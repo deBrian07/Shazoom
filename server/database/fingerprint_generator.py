@@ -4,6 +4,8 @@ import numpy as np
 from pymongo import MongoClient
 from pydub import AudioSegment
 from scipy import signal
+from tqdm import tqdm
+import concurrent.futures
 
 def generate_fingerprints(samples, sample_rate):
     """
@@ -70,18 +72,52 @@ def audio_file_to_samples(file_path):
     audio = audio.set_channels(1).set_frame_rate(44100)
     samples = np.array(audio.get_array_of_samples())
     
-    # Normalize 16-bit audio (sample_width == 2) to float values in [-1, 1].
+    # Normalize 16-bit audio to float values in [-1, 1].
     if audio.sample_width == 2:
         samples = samples.astype(np.int16) / 32768.0
     else:
         samples = samples.astype(np.float32)
     return samples, 44100
 
+def process_song(song, songs_col, fingerprints_col):
+    """
+    Processes a single song:
+      - Checks if the song already exists (duplicate prevention).
+      - Loads audio.
+      - Generates fingerprints using the original function.
+      - Inserts song metadata and fingerprints into MongoDB.
+    
+    Returns a result message.
+    """
+    # Check for duplicate song based on title and artist.
+    if songs_col.find_one({"title": song["title"], "artist": song["artist"]}):
+        return f"Skipping '{song['title']}' by {song['artist']}: Already exists."
+    
+    file_path = song["file"]
+    try:
+        samples, sr = audio_file_to_samples(file_path)
+    except Exception as e:
+        return f"Failed to load audio from {file_path}: {e}"
+    
+    # Generate fingerprints using the original method.
+    fingerprints = generate_fingerprints(samples, sr)
+    if not fingerprints:
+        return f"Warning: No fingerprints generated for '{song['title']}'."
+    
+    # Insert song metadata.
+    song_doc = {"title": song["title"], "artist": song["artist"]}
+    result = songs_col.insert_one(song_doc)
+    song_id = result.inserted_id
+    
+    # Prepare and insert fingerprint documents.
+    fp_docs = [{"song_id": song_id, "hash": hash_val, "offset": offset} 
+               for (hash_val, offset) in fingerprints]
+    fingerprints_col.insert_many(fp_docs)
+    
+    return f"Inserted {len(fp_docs)} fingerprints for '{song['title']}'."
+
 def main():
-    # Get the MongoDB connection string from the environment variable.
-    # MONGO_URI = os.environ.get("MONGO_URI")
-    # MONGO_URI = "mongodb+srv://debriann07:LtezVMIT4MlVOKMs@shazoom.trk2vxr.mongodb.net/?retryWrites=true&w=majority&appName=Shazoom"
-    # MONGO_URI = "mongodb://deBriann07:qeDqRaFeyUBJHQ4S@ac-obdf1cb-shard-00-00.trk2vxr.mongodb.net:27017,ac-obdf1cb-shard-00-01.trk2vxr.mongodb.net:27017,ac-obdf1cb-shard-00-02.trk2vxr.mongodb.net:27017/?replicaSet=atlas-os8k2z-shard-0&ssl=true&authSource=admin&retryWrites=true&w=majority&appName=Shazoom"
+    # Set your MongoDB connection string.
     MONGO_URI = "mongodb://localhost:27017/musicDB"
     if not MONGO_URI:
         print("Error: The MONGO_URI environment variable is not set.")
@@ -99,7 +135,7 @@ def main():
     # Set the path for the CSV file.
     csv_path = os.path.join("..", "download", "processed.csv")
     
-    # Read CSV file: it must have headers "song name", "artist", "wav file location"
+    # Read CSV file (with headers: "song name", "artist", "wav file location").
     songs_to_add = []
     try:
         with open(csv_path, "r", newline="", encoding="utf-8") as csvfile:
@@ -114,33 +150,18 @@ def main():
         print(f"Failed to read CSV file at '{csv_path}': {e}")
         return
 
-    # Process each song from the CSV.
-    for song in songs_to_add:
-        file_path = song["file"]
-        print(f"Processing '{song['title']}' from file: {file_path}...")
-        
-        try:
-            samples, sr = audio_file_to_samples(file_path)
-        except Exception as e:
-            print(f"Failed to load audio from {file_path}: {e}")
-            continue
-        
-        # Generate fingerprints.
-        fingerprints = generate_fingerprints(samples, sr)
-        if not fingerprints:
-            print(f"Warning: No fingerprints generated for '{song['title']}'.")
-            continue
-        
-        # Insert song metadata.
-        song_doc = {"title": song["title"], "artist": song["artist"]}
-        result = songs_col.insert_one(song_doc)
-        song_id = result.inserted_id
-        
-        # Create fingerprint documents; each document references the song via song_id.
-        fp_docs = [{"song_id": song_id, "hash": hash_val, "offset": offset}
-                   for (hash_val, offset) in fingerprints]
-        fingerprints_col.insert_many(fp_docs)
-        print(f"Inserted {len(fp_docs)} fingerprints for '{song['title']}'.")
+    results = []
+    # Use ThreadPoolExecutor for concurrent processing.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+        futures = [executor.submit(process_song, song, songs_col, fingerprints_col)
+                   for song in songs_to_add]
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processing Songs"):
+            try:
+                result = future.result()
+                results.append(result)
+                print(result)
+            except Exception as exc:
+                print(f"Generated an exception: {exc}")
 
 if __name__ == "__main__":
     main()
