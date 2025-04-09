@@ -1,23 +1,19 @@
-import logo from './logo.svg';
+import React from 'react';
+import AudioRecorder from './components/AudioRecorder';
 import './App.css';
 
 function App() {
+  // Replace <YOUR_BACKEND_URL> with the actual URL of your Flask backend, e.g., "http://47.229.136.34:5000"
+  const backendUrl = "http://47.229.136.34:5000";
+
   return (
     <div className="App">
       <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
+        <h1>Shazoom</h1>
       </header>
+      <main>
+        <AudioRecorder backendUrl={backendUrl} />
+      </main>
     </div>
   );
 }
