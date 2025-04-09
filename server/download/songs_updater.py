@@ -65,7 +65,7 @@ def collect_top_tracks(target=10000, limit=100):
     print(f"Collected {len(tracks)} tracks in total.")
     return tracks[:target]
 
-def write_tracks_to_csv(tracks, output_csv="top_tracks.csv"):
+def write_tracks_to_csv(tracks, output_csv="songs.csv"):
     """
     Writes the list of tracks to a CSV file with header: song name, artist.
     """
