@@ -19,51 +19,105 @@ fingerprints_col = db["fingerprints"]
 # Ensure that there is an index on the "hash" field for faster lookups.
 fingerprints_col.create_index("hash")
 
-def generate_fingerprints(samples, sample_rate):
+def generate_fingerprints(samples, sample_rate,
+                          threshold_multiplier=5.0,  # Multiplier for adaptive threshold per band
+                          filter_coef=1.0,           # Candidate must have amplitude >= global_mean * filter_coef
+                          fanout=5,                  # Number of subsequent candidates to pair with
+                          window_secs=5.0,           # Maximum allowed time difference (sec) for pairing
+                          window_size=4096,          # FFT window length in samples
+                          hop_size=2048,             # 50% overlap
+                          band_boundaries=None):
     """
-    Generate fingerprint hashes for an audio sample using spectral peak pairing.
+    Enhanced fingerprint generation that implements the filtering procedure described in the paper.
     
-    This simplified version:
-      - Computes a spectrogram with a Hann window.
-      - Identifies prominent peaks per time slice (using a threshold of 5× the mean amplitude).
-      - Pairs each peak with several future peaks (within a 5-second window) to form a hash.
+    Process per song:
+      1. Compute the spectrogram (using a Hann window) of the audio samples.
+      2. Limit frequencies to below 5000 Hz.
+      3. For each time slice, divide the FFT bins into six logarithmic bands.
+         (Default bands, in Hz, are defined as follows, but can be overridden:)
+           - Very low: 0–500 Hz
+           - Low:      500–1000 Hz
+           - Low-mid:  1000–2000 Hz
+           - Mid:      2000–3000 Hz
+           - Mid-high: 3000–4000 Hz
+           - High:     4000–5000 Hz
+      4. In each band of a time slice, select the candidate corresponding to the bin with maximum amplitude.
+      5. Gather these candidate peaks (with their amplitude) for every time slice.
+      6. Compute the global mean amplitude of all candidates (from the full song).
+      7. For each candidate, only keep it if its amplitude is >= global_mean * filter_coef.
+      8. Sort the surviving candidates by time.
+      9. Pair each candidate with up to 'fanout' subsequent candidates (if the time difference ≤ window_secs) to form hashes.
+         The hash for a pair is the string: "int(f1):int(f2):int(delta_t)", where delta_t is the time difference in centiseconds.
     
     Returns:
-        A list of tuples (hash_str, time_offset).
+      A list of tuples (hash_str, time_offset)
     """
-    window_size = 4096  # Number of samples per FFT
-    hop_size = 2048     # 50% overlap
-
+    # Use default band boundaries if none provided.
+    if band_boundaries is None:
+        band_boundaries = [0, 500, 1000, 2000, 3000, 4000, 5000]
+    
+    # Compute spectrogram.
     freqs, times, spec = signal.spectrogram(
         samples, fs=sample_rate, window='hann',
         nperseg=window_size, noverlap=window_size - hop_size
     )
-    spec_magnitude = np.abs(spec)
-    peak_points = []  # List of (time, frequency) tuples
-
-    # Find peaks in each time slice.
-    for t_idx, spectrum in enumerate(spec_magnitude.T):
-        peaks, properties = signal.find_peaks(spectrum, height=np.mean(spectrum) * 5)
-        if peaks.size:
-            # Take the top 5 highest peaks
-            top_peaks = sorted(peaks, key=lambda idx: spectrum[idx], reverse=True)[:5]
-            for idx in top_peaks:
-                peak_points.append((times[t_idx], freqs[idx]))
-
+    spec = np.abs(spec)
+    
+    # Limit frequencies to below 5000 Hz.
+    valid_idx = np.where(freqs < 5000)[0]
+    if valid_idx.size == 0:
+        return []
+    max_bin = valid_idx[-1] + 1
+    freqs = freqs[:max_bin]
+    spec = spec[:max_bin, :]  # shape: (n_bins, n_times)
+    
+    n_times = spec.shape[1]
+    candidates = []  # Will store tuples (time, frequency, amplitude)
+    
+    # Process each time slice.
+    for t_idx in range(n_times):
+        spectrum = spec[:, t_idx]
+        slice_candidates = []
+        n_bands = len(band_boundaries) - 1
+        for b in range(n_bands):
+            low_bound = band_boundaries[b]
+            high_bound = band_boundaries[b + 1]
+            band_idx = np.where((freqs >= low_bound) & (freqs < high_bound))[0]
+            if band_idx.size == 0:
+                continue
+            band_values = spectrum[band_idx]
+            best_idx_local = np.argmax(band_values)
+            best_amp = band_values[best_idx_local]
+            candidate_freq = freqs[band_idx[best_idx_local]]
+            slice_candidates.append((times[t_idx], candidate_freq, best_amp))
+        candidates.extend(slice_candidates)
+    
+    if not candidates:
+        return []
+    
+    all_amps = np.array([amp for (_, _, amp) in candidates])
+    global_mean = np.mean(all_amps)
+    
+    # Filter candidates based on amplitude threshold.
+    filtered_candidates = [(t, f) for (t, f, amp) in candidates if amp >= global_mean * filter_coef]
+    
+    # Sort by time.
+    filtered_candidates.sort(key=lambda x: x[0])
+    
+    # Pair candidates using a simple loop (to avoid high memory usage).
     fingerprints = []
-    fanout = 5        # Number of future peaks to pair with
-    window_secs = 5.0 # Maximum allowable time difference in seconds
-
-    for i in range(len(peak_points)):
-        t1, f1 = peak_points[i]
+    N = len(filtered_candidates)
+    for i in range(N):
+        t1, f1 = filtered_candidates[i]
         for j in range(1, fanout + 1):
-            if i + j < len(peak_points):
-                t2, f2 = peak_points[i + j]
-                if 0 < t2 - t1 <= window_secs:
+            if i + j < N:
+                t2, f2 = filtered_candidates[i + j]
+                dt = t2 - t1
+                if 0 < dt <= window_secs:
                     f1_int = int(f1)
                     f2_int = int(f2)
-                    delta_t = int((t2 - t1) * 100)  # quantize delta time in centiseconds
-                    hash_str = f"{f1_int}:{f2_int}:{delta_t}"
+                    dt_int = int(dt * 100)  # Convert to centiseconds.
+                    hash_str = f"{f1_int}:{f2_int}:{dt_int}"
                     fingerprints.append((hash_str, t1))
     return fingerprints
 
