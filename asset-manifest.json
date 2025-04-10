@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/shazoom/static/css/main.ece445bd.css",
+    "main.js": "/shazoom/static/js/main.d6e3e913.js",
+    "index.html": "/shazoom/index.html",
+    "main.ece445bd.css.map": "/shazoom/static/css/main.ece445bd.css.map",
+    "main.d6e3e913.js.map": "/shazoom/static/js/main.d6e3e913.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.ece445bd.css",
+    "static/js/main.d6e3e913.js"
+  ]
+}
