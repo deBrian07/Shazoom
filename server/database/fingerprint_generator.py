@@ -4,21 +4,22 @@ import numpy as np
 from pymongo import MongoClient
 from pydub import AudioSegment
 from scipy import signal
+from scipy.ndimage import maximum_filter
 from tqdm import tqdm
 import concurrent.futures
 
-def audio_file_to_samples(file_path):
+def audio_file_to_samples(file_obj):
     """
-    Loads an audio file and converts it to a mono stream at 44.1 kHz.
+    Loads an audio file from a file-like object and converts it to a mono stream at 44.1 kHz.
     
     Returns:
         samples (numpy array): Normalized audio samples as floats.
         sample_rate (int): 44100.
     """
     try:
-        audio = AudioSegment.from_file(file_path)
+        audio = AudioSegment.from_file(file_obj)
     except Exception as err:
-        raise Exception(f"Error loading audio file '{file_path}': {err}")
+        raise Exception(f"Error loading audio file: {err}")
     
     audio = audio.set_channels(1).set_frame_rate(44100)
     samples = np.array(audio.get_array_of_samples())
@@ -29,50 +30,40 @@ def audio_file_to_samples(file_path):
     return samples, 44100
 
 def generate_fingerprints(samples, sample_rate,
-                          threshold_multiplier=5.0,  # Multiplier for adaptive threshold per band
-                          filter_coef=1.0,           # Candidate must have amplitude >= global_mean * filter_coef
-                          fanout=5,                  # Number of subsequent candidates to pair with
-                          window_secs=5.0,           # Maximum allowed time difference (sec) for pairing
-                          window_size=4096,          # FFT window length in samples
-                          hop_size=2048,             # 50% overlap
+                          threshold_multiplier=3,  # Lowered to allow more peaks per time slice
+                          filter_coef=0.5,           # Lowered to keep more candidates through
+                          fanout=10,                 # Increased to pair more candidates
+                          window_secs=5.0,           # Pairing window in seconds
+                          window_size=4096,          # FFT window length (samples)
+                          hop_size=1024,             # Smaller hop size for higher temporal resolution
                           band_boundaries=None):
     """
-    Enhanced fingerprint generation that implements the filtering procedure described in the paper.
+    Enhanced fingerprint generation using band filtering, 2D local maximum detection, and sliding-window pairing.
     
-    Process per song:
-      1. Compute the spectrogram (using a Hann window) of the audio samples.
+    Process:
+      1. Compute the spectrogram with a Hann window.
       2. Limit frequencies to below 5000 Hz.
-      3. For each time slice, divide the FFT bins into six logarithmic bands.
-         (Default bands, in Hz, are defined as follows, but can be overridden:)
-           - Very low: 0–500 Hz
-           - Low:      500–1000 Hz
-           - Low-mid:  1000–2000 Hz
-           - Mid:      2000–3000 Hz
-           - Mid-high: 3000–4000 Hz
-           - High:     4000–5000 Hz
-      4. In each band of a time slice, select the candidate corresponding to the bin with maximum amplitude.
-      5. Gather these candidate peaks (with their amplitude) for every time slice.
-      6. Compute the global mean amplitude of all candidates (from the full song).
-      7. For each candidate, only keep it if its amplitude is >= global_mean * filter_coef.
+      3. Apply a 2D maximum filter on the spectrogram.
+      4. For each time slice, divide the frequency bins into bands (default: [0, 500, 1000, 2000, 3000, 4000, 5000] Hz).
+      5. In each band, from candidate bins (local maxima) that exceed an amplitude threshold (mean * threshold_multiplier), select the bin with maximum amplitude.
+      6. Collect all candidate peaks (time, frequency, amplitude) for each time slice.
+      7. Compute the global mean amplitude and filter out candidates with amplitude below (global_mean * filter_coef).
       8. Sort the surviving candidates by time.
-      9. Pair each candidate with up to 'fanout' subsequent candidates (if the time difference ≤ window_secs) to form hashes.
-         The hash for a pair is the string: "int(f1):int(f2):int(delta_t)", where delta_t is the time difference in centiseconds.
+      9. For each candidate, pair it with up to 'fanout' subsequent candidates (within window_secs) to form fingerprints.
+         Each fingerprint is a string "int(anchor_freq):int(candidate_freq):int(delta_t*100)".
     
     Returns:
-      A list of tuples (hash_str, time_offset)
+      A list of tuples (hash_str, candidate_time)
     """
-    # Use default band boundaries if none provided.
     if band_boundaries is None:
         band_boundaries = [0, 500, 1000, 2000, 3000, 4000, 5000]
     
-    # Compute spectrogram.
     freqs, times, spec = signal.spectrogram(
         samples, fs=sample_rate, window='hann',
         nperseg=window_size, noverlap=window_size - hop_size
     )
     spec = np.abs(spec)
     
-    # Limit frequencies to below 5000 Hz.
     valid_idx = np.where(freqs < 5000)[0]
     if valid_idx.size == 0:
         return []
@@ -80,24 +71,27 @@ def generate_fingerprints(samples, sample_rate,
     freqs = freqs[:max_bin]
     spec = spec[:max_bin, :]  # shape: (n_bins, n_times)
     
+    local_max = (spec == maximum_filter(spec, size=(3, 3)))
     n_times = spec.shape[1]
-    candidates = []  # Will store tuples (time, frequency, amplitude)
+    candidates = []  # (time, frequency, amplitude)
     
-    # Process each time slice.
     for t_idx in range(n_times):
         spectrum = spec[:, t_idx]
+        # Use the mean of this slice multiplied by threshold_multiplier as threshold.
+        amp_threshold = np.mean(spectrum) * threshold_multiplier
+        local_peaks = np.where((local_max[:, t_idx]) & (spectrum >= amp_threshold))[0]
         slice_candidates = []
         n_bands = len(band_boundaries) - 1
         for b in range(n_bands):
             low_bound = band_boundaries[b]
             high_bound = band_boundaries[b + 1]
             band_idx = np.where((freqs >= low_bound) & (freqs < high_bound))[0]
-            if band_idx.size == 0:
+            candidate_idx = np.intersect1d(band_idx, local_peaks)
+            if candidate_idx.size == 0:
                 continue
-            band_values = spectrum[band_idx]
-            best_idx_local = np.argmax(band_values)
-            best_amp = band_values[best_idx_local]
-            candidate_freq = freqs[band_idx[best_idx_local]]
+            best_idx_local = candidate_idx[np.argmax(spectrum[candidate_idx])]
+            best_amp = spectrum[best_idx_local]
+            candidate_freq = freqs[best_idx_local]
             slice_candidates.append((times[t_idx], candidate_freq, best_amp))
         candidates.extend(slice_candidates)
     
@@ -106,46 +100,45 @@ def generate_fingerprints(samples, sample_rate,
     
     all_amps = np.array([amp for (_, _, amp) in candidates])
     global_mean = np.mean(all_amps)
-    
-    # Filter candidates based on amplitude threshold.
     filtered_candidates = [(t, f) for (t, f, amp) in candidates if amp >= global_mean * filter_coef]
+    if not filtered_candidates:
+        return []
     
-    # Sort by time.
     filtered_candidates.sort(key=lambda x: x[0])
     
-    # Pair candidates using a simple loop (to avoid high memory usage).
     fingerprints = []
     N = len(filtered_candidates)
     for i in range(N):
         t1, f1 = filtered_candidates[i]
-        for j in range(1, fanout + 1):
-            if i + j < N:
-                t2, f2 = filtered_candidates[i + j]
-                dt = t2 - t1
-                if 0 < dt <= window_secs:
-                    f1_int = int(f1)
-                    f2_int = int(f2)
-                    dt_int = int(dt * 100)  # Convert to centiseconds.
-                    hash_str = f"{f1_int}:{f2_int}:{dt_int}"
-                    fingerprints.append((hash_str, t1))
+        count = 0
+        for j in range(i+1, N):
+            t2, f2 = filtered_candidates[j]
+            dt = t2 - t1
+            if dt > window_secs:
+                break
+            if count < fanout:
+                hash_str = f"{int(f1)}:{int(f2)}:{int(dt*100)}"
+                fingerprints.append((hash_str, t1))
+                count += 1
     return fingerprints
 
 def process_song(song, songs_col, fingerprints_col):
     """
     Processes a single song:
       - Checks for duplicates.
-      - Loads audio.
+      - Loads the audio file.
       - Generates fingerprints using the enhanced function.
       - Inserts song metadata and fingerprint documents into MongoDB.
-      
-    Returns a result message.
+    
+    Returns a message.
     """
     if songs_col.find_one({"title": song["title"], "artist": song["artist"]}):
         return f"Skipping '{song['title']}' by {song['artist']}: Already exists."
     
     file_path = song["file"]
     try:
-        samples, sr = audio_file_to_samples(file_path)
+        with open(file_path, "rb") as f:
+            samples, sr = audio_file_to_samples(f)
     except Exception as e:
         return f"Failed to load audio from {file_path}: {e}"
     
@@ -164,7 +157,7 @@ def process_song(song, songs_col, fingerprints_col):
     return f"Inserted {len(fp_docs)} fingerprints for '{song['title']}'."
 
 def main():
-    # Set MongoDB connection string.
+    # Connect to MongoDB.
     MONGO_URI = "mongodb://localhost:27017/musicDB"
     client = MongoClient(MONGO_URI)
     db = client["musicDB"]
@@ -172,7 +165,7 @@ def main():
     fingerprints_col = db["fingerprints"]
     fingerprints_col.create_index("hash")
     
-    # Read CSV file with headers: "song name", "artist", "wav file location".
+    # Read CSV file with headers: "song name", "artist", "wav file location"
     csv_path = os.path.join("..", "download", "processed.csv")
     songs_to_add = []
     try:
@@ -190,7 +183,7 @@ def main():
     
     results = []
     # Process songs concurrently.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         futures = [executor.submit(process_song, song, songs_col, fingerprints_col)
                    for song in songs_to_add]
         for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processing Songs"):
