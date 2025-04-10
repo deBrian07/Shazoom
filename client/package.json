@@ -1,6 +1,6 @@
 {
-  "name": "client",
-  "homepage": "https://debrian07.github.io/shazoom",
+  "name": "Shazoom",
+  "homepage": "https://debrian07.github.io/Shazoom",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
