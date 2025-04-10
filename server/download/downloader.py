@@ -2,17 +2,26 @@ import csv
 import sys
 import os
 import yt_dlp
+from tqdm import tqdm
 
 def download_song(song_name, artist):
     """
     Given a song name and artist, search YouTube and download the audio in WAV format.
+    The function checks first if the expected target file exists (even if stored in nested directories)
+    and skips the download if it already exists.
     """
     # Combine the song and artist to form the search query.
     query = f"{song_name} {artist}"
     search_query = f"ytsearch1:{query}"
     
-    # Set up yt_dlp options to extract the best audio,
-    # then convert the result to WAV using ffmpeg.
+    # Compute the expected output filename.
+    # Note: if song name or artist contain a "/", this will create subdirectories accordingly.
+    target_file = os.path.join("downloads", f"{song_name} - {artist}.wav")
+    if os.path.exists(target_file):
+        print(f"Skipping download: '{target_file}' already exists.")
+        return
+    
+    # Setup yt_dlp options for downloading and converting audio to WAV.
     ydl_opts = {
         'format': 'bestaudio/best',
         'postprocessors': [{
@@ -20,7 +29,7 @@ def download_song(song_name, artist):
             'preferredcodec': 'wav',
             'preferredquality': '192',
         }],
-        # Output template: song name - artist.wav
+        # Output template creates the same structure as target_file.
         'outtmpl': os.path.join("downloads", f"{song_name} - {artist}.%(ext)s"),
         'quiet': False,
         'no_warnings': True,
@@ -36,22 +45,18 @@ def download_song(song_name, artist):
 
 def process_csv(csv_filepath):
     """
-    Process the CSV file that contains rows of song name and artist.
-    
+    Processes the CSV file that contains rows of song name and artist.
     Expects a header row with at least two columns:
-      - 'song name' (or similar)
+      - 'song name'
       - 'artist'
+    Displays a progress bar with tqdm.
     """
-    # Ensure the downloads output directory exists
+    # Ensure that the downloads directory exists.
     os.makedirs("downloads", exist_ok=True)
     
     with open(csv_filepath, newline='', encoding='utf-8') as csvfile:
-        # Adjust fieldnames if your CSV does not include a header row:
-        # For CSV with header, csv.DictReader will use them.
-        reader = csv.DictReader(csvfile)
-        # If your CSV columns are labeled differently, update these keys.
-        for row in reader:
-            # Assuming the CSV header has the columns "song name" and "artist"
+        reader = list(csv.DictReader(csvfile))
+        for row in tqdm(reader, desc="Downloading songs", unit="song"):
             try:
                 song_name = row['song name'].strip()
                 artist = row['artist'].strip()
