@@ -13,8 +13,15 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # MongoDB connection string
-MONGO_URI = "mongodb://localhost:27017/musicDB"
+MONGO_URI = "mongodb://localhost:27017"
 client = MongoClient(MONGO_URI)
+
+DEV_MODE = False
+if DEV_MODE:
+    db = client["musicDB_dev"]
+else:
+    db = client["musicDB"]
+    
 db = client["musicDB"]
 songs_col = db["songs"]
 fingerprints_col = db["fingerprints"]

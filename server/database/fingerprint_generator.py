@@ -158,9 +158,15 @@ def process_song(song, songs_col, fingerprints_col):
 
 def main():
     # Connect to MongoDB.
-    MONGO_URI = "mongodb://localhost:27017/musicDB"
+    MONGO_URI = "mongodb://localhost:27017"
     client = MongoClient(MONGO_URI)
-    db = client["musicDB"]
+
+    DEV_MODE = False
+    if DEV_MODE:
+        db = client["musicDB_dev"]
+    else:
+        db = client["musicDB"]
+    
     songs_col = db["songs"]
     fingerprints_col = db["fingerprints"]
     fingerprints_col.create_index("hash")
