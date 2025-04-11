@@ -14,7 +14,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 MONGO_URI = "mongodb://localhost:27017"
 client = MongoClient(MONGO_URI)
 
-DEV_MODE = True  # Change to True for testing if needed.
+DEV_MODE = False  # Change to True for testing if needed.
 if DEV_MODE:
     db = client["musicDB_dev"]
 else:
@@ -73,7 +73,7 @@ def identify_song():
     best_match, best_votes = vote_counts.most_common(1)[0]
     best_song_id, best_delta = best_match
 
-    MIN_VOTES = 3
+    MIN_VOTES = 50
     if best_votes < MIN_VOTES:
         return jsonify({"result": "No match found."}), 200
 

@@ -45,7 +45,7 @@ def main():
     MONGO_URI = "mongodb://localhost:27017"
     client = MongoClient(MONGO_URI)
 
-    DEV_MODE = True  # True when testing something (change to False before commiting)
+    DEV_MODE = False  # True when testing something (change to False before commiting)
     if DEV_MODE:
         db = client["musicDB_dev"]
     else:
