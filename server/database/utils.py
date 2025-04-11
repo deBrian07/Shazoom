@@ -3,6 +3,9 @@ from scipy import signal
 from scipy.ndimage import maximum_filter
 from pydub import AudioSegment
 
+from numba import njit, types
+from numba.typed import Dict as TypedDict
+
 # --- Pre-processing functions ---
 def low_pass_filter(samples, cutoff, sample_rate):
     """Applies a first‐order low‐pass filter with cutoff frequency (Hz)."""
@@ -182,3 +185,32 @@ def generate_fingerprints_multiresolution(samples, sample_rate):
         fps_with_version = [(f"{hash_str}:{version}", candidate_time) for (hash_str, candidate_time) in fps]
         all_fps.extend(fps_with_version)
     return all_fps
+
+# --- Numba-accelerated helper ---
+@njit
+def accumulate_votes_for_hash(query_offsets, db_offset, bin_width):
+    """
+    For a single hash, given an array of query candidate offsets and a db offset,
+    accumulate votes per binned delta. Returns a dict mapping binned_delta (float64) to count (int64).
+    (We use numba.typed.Dict as a typed dictionary.)
+    """
+    votes = TypedDict.empty(key_type=types.float64, value_type=types.int64)
+    # For each query offset, compute the delta and its binned value.
+    for i in range(query_offsets.shape[0]):
+        delta = db_offset - query_offsets[i]
+        # Here we use Python's built-in round; in numba, it returns a float.
+        binned_delta = round(delta / bin_width) * bin_width
+        if binned_delta in votes:
+            votes[binned_delta] += 1
+        else:
+            votes[binned_delta] = 1
+    return votes
+
+def merge_votes(global_votes, new_votes, song_id):
+    """
+    Merges votes from new_votes (a numba typed dict) into the global_votes dictionary.
+    The keys of global_votes are tuples (song_id, binned_delta).
+    """
+    for key in new_votes:
+        global_key = (song_id, key)
+        global_votes[global_key] = global_votes.get(global_key, 0) + new_votes[key]

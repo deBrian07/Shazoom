@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS  
 from pymongo import MongoClient
 from collections import defaultdict, Counter
-from database.utils import audio_file_to_samples, generate_fingerprints_multiresolution
+from database.utils import audio_file_to_samples, generate_fingerprints_multiresolution, accumulate_votes_for_hash, merge_votes
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -45,51 +45,50 @@ def identify_song():
     if not query_fps:
         return jsonify({"error": "No fingerprints generated from audio."}), 500
 
-    # Map: fingerprint hash --> list of query candidate offsets.
+    # Build a mapping: fingerprint hash -> list of query candidate offsets
     query_hashes = defaultdict(list)
     for h, q_offset in query_fps:
         query_hashes[h].append(q_offset)
     
-    # Bulk query the DB for matching fingerprints.
     hash_list = list(query_hashes.keys())
-    db_cursor = fingerprints_col.find({"hash": {"$in": hash_list}})
+    # Use projection to retrieve only needed fields.
+    db_cursor = fingerprints_col.find({"hash": {"$in": hash_list}}, {"hash": 1, "song_id": 1, "offset": 1})
     
-    bin_width = 0.2  # seconds; for offset binning (you may tune this)
-    votes = defaultdict(int)
+    bin_width = 0.2  # seconds; adjustable parameter for offset binning
+    global_votes = {}  # Python dictionary: keys are tuples (song_id, binned_delta)
+    
+    # For each matching fingerprint in DB, call the numba-accelerated function for that hash.
     for db_fp in db_cursor:
-        song_id = db_fp.get("song_id")
-        db_offset = db_fp.get("offset")
+        song_id = db_fp["song_id"]
+        db_offset = db_fp["offset"]
         h = db_fp["hash"]
         if h in query_hashes:
-            for q_offset in query_hashes[h]:
-                delta = db_offset - q_offset
-                binned_delta = round(delta / bin_width) * bin_width
-                votes[(song_id, binned_delta)] += 1
+            # Convert the query offsets list to a numpy array.
+            query_offsets_array = np.array(query_hashes[h], dtype=np.float64)
+            votes_for_hash = accumulate_votes_for_hash(query_offsets_array, db_offset, bin_width)
+            merge_votes(global_votes, votes_for_hash, song_id)
 
-    if not votes:
+    if not global_votes:
         return jsonify({"result": "No match found."}), 200
 
-    vote_counts = Counter(votes)
+    vote_counts = Counter(global_votes)
     best_match, best_votes = vote_counts.most_common(1)[0]
     best_song_id, best_delta = best_match
 
-    MIN_VOTES = 50
+    MIN_VOTES = 20
     if best_votes < MIN_VOTES:
         return jsonify({"result": "No match found."}), 200
-
-    # --- Normalization Part ---
-    # Retrieve the total number of fingerprints in the database for the best matching song.
-    total_db = fingerprints_col.count_documents({"song_id": best_song_id})
-    # Compute a normalized score (you might combine this with the query fingerprint count).
-    normalized_score = best_votes / total_db if total_db > 0 else 0
-
-    # You might also combine with the query fingerprint count:
-    total_query = len(query_fps)
-    vote_ratio = best_votes / total_query if total_query > 0 else 0
 
     song = songs_col.find_one({"_id": best_song_id})
     if not song:
         return jsonify({"result": "No match found."}), 200
+
+    total_query = len(query_fps)
+    vote_ratio = best_votes / total_query if total_query > 0 else 0
+
+    # Normalization: use total count of fingerprints stored in the DB for this song.
+    total_db = fingerprints_col.count_documents({"song_id": best_song_id})
+    normalized_score = best_votes / total_db if total_db > 0 else 0
 
     return jsonify({
         "song": song.get("title"),
