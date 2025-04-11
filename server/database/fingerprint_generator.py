@@ -2,19 +2,16 @@ import os
 import csv
 import numpy as np
 from pymongo import MongoClient
-from pydub import AudioSegment
-from scipy import signal
-from scipy.ndimage import maximum_filter
 from tqdm import tqdm
 import concurrent.futures
-from utils import audio_file_to_samples, generate_fingerprints
+from utils import audio_file_to_samples, generate_fingerprints_multiresolution
 
 def process_song(song, songs_col, fingerprints_col):
     """
     Processes a single song:
       - Checks for duplicates.
       - Loads the audio file.
-      - Generates fingerprints using the enhanced function.
+      - Generates multi-resolution fingerprints using the enhanced function.
       - Inserts song metadata and fingerprint documents into MongoDB.
     
     Returns a message.
@@ -29,7 +26,8 @@ def process_song(song, songs_col, fingerprints_col):
     except Exception as e:
         return f"Failed to load audio from {file_path}: {e}"
     
-    fingerprints = generate_fingerprints(samples, sr)
+    # Use the new multi-resolution fingerprint function.
+    fingerprints = generate_fingerprints_multiresolution(samples, sr)
     if not fingerprints:
         return f"Warning: No fingerprints generated for '{song['title']}'."
     
@@ -37,8 +35,7 @@ def process_song(song, songs_col, fingerprints_col):
     result = songs_col.insert_one(song_doc)
     song_id = result.inserted_id
     
-    fp_docs = [{"song_id": song_id, "hash": hash_val, "offset": offset}
-               for (hash_val, offset) in fingerprints]
+    fp_docs = [{"song_id": song_id, "hash": h, "offset": offset} for (h, offset) in fingerprints]
     fingerprints_col.insert_many(fp_docs)
     
     return f"Inserted {len(fp_docs)} fingerprints for '{song['title']}'."
@@ -48,7 +45,7 @@ def main():
     MONGO_URI = "mongodb://localhost:27017"
     client = MongoClient(MONGO_URI)
 
-    DEV_MODE = False
+    DEV_MODE = True  # True when testing something (change to False before commiting)
     if DEV_MODE:
         db = client["musicDB_dev"]
     else:

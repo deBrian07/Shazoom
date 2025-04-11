@@ -119,3 +119,30 @@ def generate_fingerprints(samples, sample_rate,
                 fingerprints.append((hash_str, t1))
                 count += 1
     return fingerprints
+
+def generate_fingerprints_multiresolution(samples, sample_rate):
+    """
+    Generates and returns the union of fingerprints computed at multiple resolutions.
+    Each fingerprint is a tuple (hash_str, candidate_time, version), where 'version' identifies the configuration.
+    """
+    configs = [
+        # (window_size, hop_size, version)
+        (4096, 1024, "high_freq"),   # High frequency resolution: longer window, coarser time resolution.
+        (1024, 256, "high_time")     # High temporal resolution: shorter window, finer time resolution.
+    ]
+    all_fingerprints = []
+    for window_size, hop_size, version in configs:
+        fps = generate_fingerprints(
+            samples, sample_rate,
+            threshold_multiplier=4, # TUNE
+            filter_coef=0.7, # TUNE
+            fanout=7, # TUNE
+            window_secs=5.0,
+            window_size=window_size,
+            hop_size=hop_size,
+            band_boundaries=None  # you can use default bands [0,500,1000,...,5000]
+        )
+        # Tag each fingerprint with the version identifier.
+        fps_with_version = [(hash_str + f":{version}", candidate_time) for (hash_str, candidate_time) in fps]
+        all_fingerprints.extend(fps_with_version)
+    return all_fingerprints
