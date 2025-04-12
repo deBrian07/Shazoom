@@ -1,0 +1,94 @@
+.audio-recorder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    max-width: 400px;
+    margin: 0 auto;
+  }
+  
+  .recorder-title {
+    font-size: 1.2rem;
+    color: #fff;
+    margin-bottom: 2rem;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    min-height: 1.5em;  /* Reserve space even when hidden */
+  }
+  
+  /* Hide title without collapsing space */
+  .recorder-title.hidden {
+    visibility: hidden;
+  }
+  
+  .record-button,
+  .stop-button {
+    width: 200px;
+    height: 200px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    transition: transform 0.3s, box-shadow 0.3s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 50%;
+  }
+  
+  /* Record button uses custom microphone PNG */
+  .record-button {
+    background-image: url('/public/Microphone.png');
+    background-size: 90%;
+  }
+  
+  /* Stop button: enlarge stop icon */
+  .stop-button {
+    font-size: 10rem;
+    color: #fff;
+  }
+  
+  /* Hover effect */
+  .record-button:hover,
+  .stop-button:hover {
+    transform: scale(1.08);
+    box-shadow: 0 12px 25px rgba(0, 0, 0, 0.4);
+  }
+  
+  /* Loading effect: adds a spinning ring around the button */
+  .record-button.loading,
+  .stop-button.loading {
+    position: relative;
+  }
+  
+  .record-button.loading::after,
+  .stop-button.loading::after {
+    content: "";
+    position: absolute;
+    top: -20px;
+    left: -20px;
+    width: calc(100% + 40px);
+    height: calc(100% + 40px);
+    border: 6px solid rgba(255, 255, 255, 0.3);
+    border-top: 6px solid #fff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  
+  .result {
+    margin-top: 2rem;
+    font-size: 1.1rem;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    text-align: center;
+    max-width: 80%;
+  }
+  

@@ -1,22 +1,27 @@
-/* src/App.css */
 .App {
+  min-height: 100vh;           /* Fill the entire viewport height */
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
   text-align: center;
-  font-family: Arial, sans-serif;
+  /* Shazam-like gradient (top to bottom) */
+  background: linear-gradient(180deg, #00b3ff 0%, #0066ff 100%);
+  font-family: 'Helvetica Neue', Arial, sans-serif;
 }
 
+/* Header text: "Tap to Shazam" style */
 .App-header {
-  background-color: #282c34;
-  padding: 20px;
-  color: white;
+  padding: 2rem 1rem 1rem;
+  font-size: 2rem;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-.audio-recorder {
-  margin-top: 20px;
-}
-
-button {
-  padding: 10px 20px;
-  font-size: 16px;
-  margin: 10px;
-  cursor: pointer;
+.main-content {
+  flex: 1;             /* Make this area grow to fill remaining space */
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
