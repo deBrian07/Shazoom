@@ -3,6 +3,7 @@ import './AudioRecorder.css';
 
 const AudioRecorder = ({ backendUrl }) => {
   const [isRecording, setIsRecording] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -13,6 +14,7 @@ const AudioRecorder = ({ backendUrl }) => {
       mediaRecorderRef.current = new MediaRecorder(stream);
       audioChunksRef.current = [];
       setResult(null);
+      setIsLoading(false);
 
       mediaRecorderRef.current.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -22,6 +24,7 @@ const AudioRecorder = ({ backendUrl }) => {
 
       mediaRecorderRef.current.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setIsLoading(true);  // Begin loading before sending the audio
         sendAudioToBackend(audioBlob);
       };
 
@@ -53,6 +56,7 @@ const AudioRecorder = ({ backendUrl }) => {
       .then((res) => res.json())
       .then((data) => {
         console.log("Server response:", data);
+        setIsLoading(false);  // Stop loading when response received
         if (data.song && data.artist) {
           setResult(`Recognized Song: ${data.song} by ${data.artist}`);
         } else if (data.result) {
@@ -63,17 +67,21 @@ const AudioRecorder = ({ backendUrl }) => {
       })
       .catch((err) => {
         console.error("Error sending audio data:", err);
+        setIsLoading(false);
         setResult("There was an error identifying the song.");
       });
   };
 
+  // Change title text based on loading status
+  const titleText = isLoading ? "Shazooming..." : "Tap to Shazam";
+
   return (
     <div className="audio-recorder">
-      <h2 className={`recorder-title ${isRecording ? 'hidden' : ''}`}>Tap to Shazam</h2>
+      <h2 className="recorder-title">{titleText}</h2>
       { !isRecording ? (
-        <button onClick={startRecording} className="record-button" />
+        <button onClick={startRecording} className={`record-button ${isLoading ? 'loading' : ''}`} />
       ) : (
-        <button onClick={stopRecording} className="stop-button">
+        <button onClick={stopRecording} className={`stop-button ${isLoading ? 'loading' : ''}`}>
           ⏹
         </button>
       )}

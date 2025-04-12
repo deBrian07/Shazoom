@@ -1,4 +1,3 @@
-/* src/AudioRecorder.css */
 .audio-recorder {
     display: flex;
     flex-direction: column;
@@ -13,15 +12,14 @@
     color: #fff;
     margin-bottom: 2rem;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-    min-height: 1.5em;  /* Fixed height so space remains */
+    min-height: 1.5em;  /* Reserve space even when hidden */
   }
   
-  /* Hide text without collapsing the element */
+  /* Hide title without collapsing space */
   .recorder-title.hidden {
     visibility: hidden;
   }
   
-  /* Common styles for both buttons */
   .record-button,
   .stop-button {
     width: 200px;
@@ -41,30 +39,55 @@
     background-size: 50%;
   }
   
-  /* Record button: use your Microphone PNG as background */
+  /* Record button uses custom microphone PNG */
   .record-button {
     background-image: url('/public/Microphone.png');
     background-size: 90%;
   }
   
-  /* Stop button: increase font-size for a larger stop icon */
+  /* Stop button: enlarge stop icon */
   .stop-button {
     font-size: 10rem;
     color: #fff;
   }
   
-  /* Hover effects */
+  /* Hover effect */
   .record-button:hover,
   .stop-button:hover {
     transform: scale(1.08);
     box-shadow: 0 12px 25px rgba(0, 0, 0, 0.4);
   }
   
+  /* Loading effect: adds a spinning ring around the button */
+  .record-button.loading,
+  .stop-button.loading {
+    position: relative;
+  }
+  
+  .record-button.loading::after,
+  .stop-button.loading::after {
+    content: "";
+    position: absolute;
+    top: -20px;
+    left: -20px;
+    width: calc(100% + 40px);
+    height: calc(100% + 40px);
+    border: 6px solid rgba(255, 255, 255, 0.3);
+    border-top: 6px solid #fff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  
   .result {
     margin-top: 2rem;
     font-size: 1.1rem;
     color: #fff;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
     text-align: center;
     max-width: 80%;
   }
