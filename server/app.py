@@ -8,7 +8,7 @@ from collections import defaultdict, Counter
 from database.utils import audio_file_to_samples, generate_fingerprints_multiresolution, accumulate_votes_for_hash, merge_votes
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
 # MongoDB connection string
 MONGO_URI = "mongodb://localhost:27017"
