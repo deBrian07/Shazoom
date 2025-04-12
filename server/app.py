@@ -12,6 +12,8 @@ from database.utils import (
     merge_votes
 )
 import time
+from concurrent.futures import ThreadPoolExecutor
+from itertools import chain
 
 app = Flask(__name__)
 allowed_origins = ["http://localhost:3000", "https://debrian07.github.io"]
@@ -31,6 +33,14 @@ songs_col = db["songs"]
 fingerprints_col = db["fingerprints"]
 fingerprints_col.create_index("hash")
 
+def find_fingerprint_batch(hash_batch):
+    """Query fingerprints using a batch of hashes and return the list of docs."""
+    cursor = fingerprints_col.find(
+        {"hash": {"$in": hash_batch}},
+        {"hash": 1, "song_id": 1, "offset": 1}
+    ).batch_size(1000)
+    return list(cursor)
+
 @app.route('/identify', methods=['POST'])
 def identify_song():
     start_time = time.time()
@@ -47,20 +57,23 @@ def identify_song():
     if not query_fps:
         return jsonify({"error": "No fingerprints generated from audio."}), 500
 
-    # Build mapping: fingerprint hash --> list of candidate offsets for the query.
+    # Build mapping: fingerprint hash --> list of candidate offsets.
     query_hashes = defaultdict(list)
     for h, q_offset in query_fps:
         query_hashes[h].append(q_offset)
     hash_list = list(query_hashes.keys())
-
+    
+    # --- Improved Query: Split hash_list into batches and query concurrently ---
+    batch_size = 16  # you may tune this value based on performance
+    hash_batches = [hash_list[i:i+batch_size] for i in range(0, len(hash_list), batch_size)]
+    num_batches = len(hash_batches)
+    
     start_find = time.time()
-    # Retrieve only needed fields with projection.
-    db_cursor = fingerprints_col.find(
-        {"hash": {"$in": hash_list}},
-        {"hash": 1, "song_id": 1, "offset": 1}
-    )
-    # Convert the cursor into a list for faster grouping.
-    db_docs = list(db_cursor)
+    # Use ThreadPoolExecutor to run parallel queries.
+    with ThreadPoolExecutor(max_workers=max(128, num_batches)) as executor:
+        futures = [executor.submit(find_fingerprint_batch, batch) for batch in hash_batches]
+        results_batches = [future.result() for future in futures]
+    db_docs = list(chain.from_iterable(results_batches))
     find_query_time = time.time() - start_find
 
     # Group the DB fingerprints by hash.
@@ -69,7 +82,7 @@ def identify_song():
         h = doc["hash"]
         db_group[h].append((doc["song_id"], doc["offset"]))
 
-    bin_width = 0.2  # seconds, adjustable for offset binning
+    bin_width = 0.2  # seconds; adjustable for offset binning
     global_votes = defaultdict(int)
 
     start_match = time.time()
@@ -78,7 +91,6 @@ def identify_song():
         if h not in db_group:
             continue
         query_offsets_array = np.array(query_offsets, dtype=np.float64)
-        # For each corresponding DB document under this hash:
         for song_id, db_offset in db_group[h]:
             votes_for_hash = accumulate_votes_for_hash(query_offsets_array, db_offset, bin_width)
             merge_votes(global_votes, votes_for_hash, song_id)
@@ -113,7 +125,6 @@ def identify_song():
 
     total_query = len(query_fps)
     vote_ratio = best_votes / total_query if total_query > 0 else 0
-
 
     overall_time = time.time() - start_time
     return jsonify({
