@@ -1,21 +1,28 @@
 import os
 import csv
 import numpy as np
-from flask import Flask, request, jsonify
-from flask_cors import CORS  
-from pymongo import MongoClient
+from quart import Quart, request, jsonify
+from quart_cors import cors
+from motor.motor_asyncio import AsyncIOMotorClient
 from collections import defaultdict, Counter
-from database.utils import audio_file_to_samples, generate_fingerprints_multiresolution, accumulate_votes_for_hash, merge_votes
+from database.utils import (
+    audio_file_to_samples,
+    generate_fingerprints_multiresolution,
+    accumulate_votes_for_hash,
+    merge_votes
+)
+import time
+import asyncio
+from itertools import chain
 
-app = Flask(__name__)
+app = Quart(__name__)
 allowed_origins = ["http://localhost:3000", "https://debrian07.github.io"]
-CORS(app, resources={r"/*": {"origins": allowed_origins}})
+app = cors(app, allow_origin=allowed_origins)
 
-# MongoDB connection string
+# MongoDB connection using Motor.
 MONGO_URI = "mongodb://localhost:27017"
-client = MongoClient(MONGO_URI)
-
-DEV_MODE = False  # Change to True for testing if needed.
+client = AsyncIOMotorClient(MONGO_URI)
+DEV_MODE = False
 if DEV_MODE:
     db = client["musicDB_dev"]
 else:
@@ -23,83 +30,117 @@ else:
 
 songs_col = db["songs"]
 fingerprints_col = db["fingerprints"]
-fingerprints_col.create_index("hash")
+
+# Ensure the hash index exists.
+@app.before_serving
+async def ensure_index():
+    await fingerprints_col.create_index("hash")
+
+async def find_fingerprint_batch(batch):
+    cursor = fingerprints_col.find(
+        {"hash": {"$in": batch}},
+        {"hash": 1, "song_id": 1, "offset": 1}
+    ).batch_size(1000)
+    return await cursor.to_list(length=None)
 
 @app.route('/identify', methods=['POST'])
-def identify_song():
-    """
-    POST /identify:
-    Expects a multipart form-data upload with an 'audio' file.
-    Processes the audio to extract multi-resolution fingerprints and performs
-    offset alignment voting to identify the song.
-    """
-    if "audio" not in request.files:
+async def identify_song():
+    start_time = time.time()
+    if "audio" not in (await request.files):
         return jsonify({"error": "No audio file provided."}), 400
-    file = request.files["audio"]
+    file = (await request.files)["audio"]
+    
     try:
         samples, sample_rate = audio_file_to_samples(file)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    # Use the new multi-resolution fingerprint function.
+    # Generate fingerprints using the multi-resolution method.
     query_fps = generate_fingerprints_multiresolution(samples, sample_rate)
     if not query_fps:
         return jsonify({"error": "No fingerprints generated from audio."}), 500
 
-    # Build a mapping: fingerprint hash -> list of query candidate offsets
+    # Build mapping: fingerprint hash --> list of candidate offsets for the query.
     query_hashes = defaultdict(list)
     for h, q_offset in query_fps:
         query_hashes[h].append(q_offset)
-    
     hash_list = list(query_hashes.keys())
-    # Use projection to retrieve only needed fields.
-    db_cursor = fingerprints_col.find({"hash": {"$in": hash_list}}, {"hash": 1, "song_id": 1, "offset": 1})
     
-    bin_width = 0.2  # seconds; adjustable parameter for offset binning
-    global_votes = {}  # Python dictionary: keys are tuples (song_id, binned_delta)
+    # --- Improved Query: Split hash_list into batches and query concurrently ---
+    batch_size = 8  # Tune as needed (try a larger batch size if your hardware can handle it)
+    hash_batches = [hash_list[i:i+batch_size] for i in range(0, len(hash_list), batch_size)]
     
-    # For each matching fingerprint in DB, call the numba-accelerated function for that hash.
-    for db_fp in db_cursor:
-        song_id = db_fp["song_id"]
-        db_offset = db_fp["offset"]
-        h = db_fp["hash"]
-        if h in query_hashes:
-            # Convert the query offsets list to a numpy array.
-            query_offsets_array = np.array(query_hashes[h], dtype=np.float64)
+    start_find = time.time()
+    batch_results = await asyncio.gather(*(find_fingerprint_batch(batch) for batch in hash_batches))
+    db_docs = list(chain.from_iterable(batch_results))
+    find_query_time = time.time() - start_find
+
+    # Group the DB fingerprints by hash.
+    db_group = defaultdict(list)
+    for doc in db_docs:
+        h = doc["hash"]
+        db_group[h].append((doc["song_id"], doc["offset"]))
+
+    bin_width = 0.2  # seconds; adjustable for offset binning
+    global_votes = defaultdict(int)
+
+    # Instead of limiting concurrency via a semaphore, run tasks concurrently for every hash.
+    async def process_hash(h, query_offsets):
+        if h not in db_group:
+            return
+        query_offsets_array = np.array(query_offsets, dtype=np.float64)
+        for song_id, db_offset in db_group[h]:
             votes_for_hash = accumulate_votes_for_hash(query_offsets_array, db_offset, bin_width)
             merge_votes(global_votes, votes_for_hash, song_id)
+    
+    start_match = time.time()
+    # Launch tasks concurrently for all hashes (without semaphore)
+    await asyncio.gather(*(process_hash(h, offsets) for h, offsets in query_hashes.items()))
+    match_time = time.time() - start_match
 
     if not global_votes:
-        return jsonify({"result": "No match found."}), 200
+        overall_time = time.time() - start_time
+        return jsonify({
+            "result": "No match found.",
+            "find_query_time": find_query_time,
+            "match_time": match_time,
+            "overall_time": overall_time
+        }), 200
 
     vote_counts = Counter(global_votes)
     best_match, best_votes = vote_counts.most_common(1)[0]
     best_song_id, best_delta = best_match
 
-    MIN_VOTES = 20
+    MIN_VOTES = 30
     if best_votes < MIN_VOTES:
-        return jsonify({"result": "No match found."}), 200
+        overall_time = time.time() - start_time
+        return jsonify({
+            "result": "No match found.",
+            "find_query_time": find_query_time,
+            "match_time": match_time,
+            "overall_time": overall_time
+        }), 200
 
-    song = songs_col.find_one({"_id": best_song_id})
+    song = await songs_col.find_one({"_id": best_song_id})
     if not song:
         return jsonify({"result": "No match found."}), 200
 
     total_query = len(query_fps)
     vote_ratio = best_votes / total_query if total_query > 0 else 0
 
-    # Normalization: use total count of fingerprints stored in the DB for this song.
-    total_db = fingerprints_col.count_documents({"song_id": best_song_id})
-    normalized_score = best_votes / total_db if total_db > 0 else 0
-
+    overall_time = time.time() - start_time
     return jsonify({
         "song": song.get("title"),
         "artist": song.get("artist"),
         "offset": best_delta,
         "raw_votes": best_votes,
-        "total_db_fps": total_db,
         "vote_ratio": vote_ratio,
-        "normalized_score": normalized_score
+        "find_query_time": find_query_time,
+        "match_time": match_time,
+        "overall_time": overall_time
     }), 200
 
 if __name__ == "__main__":
+    # Run the Quart app with an ASGI server (e.g., uvicorn or hypercorn)
+    # Example: uvicorn app:app --host 0.0.0.0 --port 5000
     app.run(host="0.0.0.0", port=5000, debug=False)
