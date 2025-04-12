@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import './AudioRecorder.css';
 
 const AudioRecorder = ({ backendUrl }) => {
   const [isRecording, setIsRecording] = useState(false);
@@ -6,14 +7,11 @@ const AudioRecorder = ({ backendUrl }) => {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  // Start recording: request microphone access and begin capturing audio chunks.
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorderRef.current = new MediaRecorder(stream);
       audioChunksRef.current = [];
-      
-      // Clear previous result when starting a new recording.
       setResult(null);
 
       mediaRecorderRef.current.ondataavailable = (event) => {
@@ -22,7 +20,6 @@ const AudioRecorder = ({ backendUrl }) => {
         }
       };
 
-      // On stop: assemble the chunks into a Blob and send it to the backend.
       mediaRecorderRef.current.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         sendAudioToBackend(audioBlob);
@@ -37,7 +34,6 @@ const AudioRecorder = ({ backendUrl }) => {
     }
   };
 
-  // Stop recording and trigger the onstop event.
   const stopRecording = () => {
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
@@ -46,7 +42,6 @@ const AudioRecorder = ({ backendUrl }) => {
     }
   };
 
-  // Send the recorded audio to the backend, then update the result state.
   const sendAudioToBackend = (audioBlob) => {
     const formData = new FormData();
     formData.append("audio", audioBlob, "recording.webm");
@@ -74,18 +69,16 @@ const AudioRecorder = ({ backendUrl }) => {
 
   return (
     <div className="audio-recorder">
-      <h2>Record Your Audio</h2>
+      <h2 className={`recorder-title ${isRecording ? 'hidden' : ''}`}>Tap to Shazam</h2>
       { !isRecording ? (
-        <button onClick={startRecording} className="record-button">
-          🎤 Start Recording
-        </button>
+        <button onClick={startRecording} className="record-button" />
       ) : (
         <button onClick={stopRecording} className="stop-button">
-          Stop Recording
+          ⏹
         </button>
       )}
       {result && (
-        <div className="result" style={{ marginTop: "20px" }}>
+        <div className="result">
           <p>{result}</p>
         </div>
       )}
