@@ -12,14 +12,17 @@
     color: #fff;
     margin-bottom: 2rem;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-    min-height: 1.5em;  /* Reserve space even when hidden */
+    min-height: 1.5em;
   }
   
-  /* Hide title without collapsing space */
-  .recorder-title.hidden {
-    visibility: hidden;
+  /* Container that allows ripple and spinner effects to expand outside the button */
+  .button-wrapper {
+    position: relative;
+    display: inline-block;
+    overflow: visible;
   }
   
+  /* Common button styles */
   .record-button,
   .stop-button {
     width: 200px;
@@ -37,28 +40,57 @@
     background-repeat: no-repeat;
     background-position: center;
     background-size: 50%;
+    overflow: visible;
   }
   
-  /* Record button uses custom microphone PNG */
+  /* Record button: uses custom microphone PNG */
   .record-button {
     background-image: url('/public/Microphone.png');
     background-size: 90%;
   }
   
-  /* Stop button: enlarge stop icon */
+  /* Stop button: no background image, large stop icon */
   .stop-button {
+    background: none;
     font-size: 10rem;
     color: #fff;
   }
   
-  /* Hover effect */
+  /* Hover effects */
   .record-button:hover,
   .stop-button:hover {
     transform: scale(1.08);
     box-shadow: 0 12px 25px rgba(0, 0, 0, 0.4);
   }
   
-  /* Loading effect: adds a spinning ring around the button */
+  /* Ripple effect: each spawned ripple expands and fades */
+  .ripple {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 200px;    /* matches button width at start */
+    height: 200px;
+    margin-left: -104px;
+    margin-top: -104px;
+    border: 4px solid rgba(255, 255, 255, 0.7);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+    animation: ripple-animation 1s ease-out forwards;
+  }
+  
+  @keyframes ripple-animation {
+    0% {
+      transform: scale(1);
+      opacity: 0.7;
+    }
+    100% {
+      transform: scale(2);
+      opacity: 0;
+    }
+  }
+  
+  /* Loading spinner effect (used when isLoading is true) */
   .record-button.loading,
   .stop-button.loading {
     position: relative;
@@ -68,14 +100,15 @@
   .stop-button.loading::after {
     content: "";
     position: absolute;
-    top: -20px;
-    left: -20px;
+    top: -24px;
+    left: -24px;
     width: calc(100% + 40px);
     height: calc(100% + 40px);
     border: 6px solid rgba(255, 255, 255, 0.3);
     border-top: 6px solid #fff;
     border-radius: 50%;
     animation: spin 1s linear infinite;
+    z-index: 1;
   }
   
   @keyframes spin {
@@ -87,8 +120,7 @@
     margin-top: 2rem;
     font-size: 1.1rem;
     color: #fff;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
     text-align: center;
     max-width: 80%;
-  }
-  
+  }  

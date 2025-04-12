@@ -7,6 +7,20 @@ const AudioRecorder = ({ backendUrl }) => {
   const [result, setResult] = useState(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const rippleIntervalRef = useRef(null);
+  const buttonWrapperRef = useRef(null);
+
+  // Function to spawn a ripple element that expands and fades out.
+  const spawnRipple = () => {
+    if (!buttonWrapperRef.current) return;
+    const ripple = document.createElement('div');
+    ripple.className = 'ripple';
+    buttonWrapperRef.current.appendChild(ripple);
+    // Remove ripple after animation completes (1.5 seconds)
+    setTimeout(() => {
+      ripple.remove();
+    }, 1500);
+  };
 
   const startRecording = async () => {
     try {
@@ -23,14 +37,24 @@ const AudioRecorder = ({ backendUrl }) => {
       };
 
       mediaRecorderRef.current.onstop = () => {
+        // When recording stops, clear the ripple spawner
+        if (rippleIntervalRef.current) {
+          clearInterval(rippleIntervalRef.current);
+        }
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        setIsLoading(true);  // Begin loading before sending the audio
+        // Activate loading spinner while waiting for backend result
+        setIsLoading(true);
         sendAudioToBackend(audioBlob);
       };
 
       mediaRecorderRef.current.start();
       setIsRecording(true);
       console.log("Recording started...");
+      
+      // Spawn new ripple every 600ms while recording
+      rippleIntervalRef.current = setInterval(() => {
+        spawnRipple();
+      }, 600);
     } catch (error) {
       console.error("Error accessing microphone:", error);
       alert("Unable to access microphone. Please grant permission.");
@@ -56,7 +80,7 @@ const AudioRecorder = ({ backendUrl }) => {
       .then((res) => res.json())
       .then((data) => {
         console.log("Server response:", data);
-        setIsLoading(false);  // Stop loading when response received
+        setIsLoading(false);
         if (data.song && data.artist) {
           setResult(`Recognized Song: ${data.song} by ${data.artist}`);
         } else if (data.result) {
@@ -72,19 +96,33 @@ const AudioRecorder = ({ backendUrl }) => {
       });
   };
 
-  // Change title text based on loading status
-  const titleText = isLoading ? "Shazooming..." : "Tap to Shazam";
+  // Compute header text based on state.
+  let titleText = "Tap to Shazoom";
+  if (isLoading) {
+    titleText = "Shazooming...";
+  } else if (isRecording) {
+    titleText = "Listening...";
+  }
 
   return (
     <div className="audio-recorder">
       <h2 className="recorder-title">{titleText}</h2>
-      { !isRecording ? (
-        <button onClick={startRecording} className={`record-button ${isLoading ? 'loading' : ''}`} />
-      ) : (
-        <button onClick={stopRecording} className={`stop-button ${isLoading ? 'loading' : ''}`}>
-          ⏹
-        </button>
-      )}
+      {/* Button-wrapper allows ripples and spinner to expand outside the button */}
+      <div ref={buttonWrapperRef} className="button-wrapper">
+        { !isRecording ? (
+          <button 
+            onClick={startRecording} 
+            className={`record-button ${isLoading ? 'loading' : ''}`} 
+          />
+        ) : (
+          <button 
+            onClick={stopRecording} 
+            className={`stop-button ${isLoading ? 'loading' : ''}`}
+          >
+            ⏹
+          </button>
+        )}
+      </div>
       {result && (
         <div className="result">
           <p>{result}</p>
