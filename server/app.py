@@ -1,7 +1,7 @@
 import os
 import csv
 import numpy as np
-from quart import Quart, request, jsonify
+from quart import Quart, request, jsonify, websocket
 from quart_cors import cors
 from motor.motor_asyncio import AsyncIOMotorClient
 from collections import defaultdict, Counter
@@ -14,8 +14,11 @@ from database.utils import (
 import time
 import asyncio
 from itertools import chain
+from io import BytesIO
+import json
 
 app = Quart(__name__)
+# Allow both the local frontend and your GitHub-hosted site.
 allowed_origins = ["http://localhost:3000", "https://debrian07.github.io"]
 app = cors(app, allow_origin=allowed_origins)
 
@@ -43,104 +46,116 @@ async def find_fingerprint_batch(batch):
     ).batch_size(1000)
     return await cursor.to_list(length=None)
 
-@app.route('/identify', methods=['POST'])
-async def identify_song():
+@app.websocket('/stream')
+async def stream():
+    """
+    WebSocket endpoint for real-time streaming recognition.
+    Logic:
+      - Start receiving audio chunks from the client.
+      - Record for up to 15 seconds (max_recording).
+      - Do not try matching until at least 5 seconds have elapsed.
+      - Every second thereafter, process the currently accumulated audio,
+        generate fingerprints, query the DB, and compute votes.
+      - If the raw vote count is at least 35, immediately send the match result.
+      - If no valid match is found by the end, send "No match found."
+    """
+    audio_buffer = BytesIO()
     start_time = time.time()
-    if "audio" not in (await request.files):
-        return jsonify({"error": "No audio file provided."}), 400
-    file = (await request.files)["audio"]
+    last_match_time = time.time()
+    match_result = None
+    max_recording = 9.0  # seconds maximum recording duration
+    threshold_time = 4.0  # wait at least 4 seconds before first matching check
+    min_votes = 40        # require at least 35 votes to return a match
     
-    try:
-        samples, sample_rate = audio_file_to_samples(file)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    # Generate fingerprints using the multi-resolution method.
-    query_fps = generate_fingerprints_multiresolution(samples, sample_rate)
-    if not query_fps:
-        return jsonify({"error": "No fingerprints generated from audio."}), 500
-
-    # Build mapping: fingerprint hash --> list of candidate offsets for the query.
-    query_hashes = defaultdict(list)
-    for h, q_offset in query_fps:
-        query_hashes[h].append(q_offset)
-    hash_list = list(query_hashes.keys())
+    await websocket.send(json.dumps({"status": "Recording started"}))
     
-    # --- Improved Query: Split hash_list into batches and query concurrently ---
-    batch_size = 8  # Tune as needed (try a larger batch size if your hardware can handle it)
-    hash_batches = [hash_list[i:i+batch_size] for i in range(0, len(hash_list), batch_size)]
+    while True:
+        # Determine remaining time (if any)
+        remaining = max_recording - (time.time() - start_time)
+        if remaining <= 0:
+            break
+        try:
+            # Wait for an incoming chunk with a timeout set to remaining time.
+            chunk = await asyncio.wait_for(websocket.receive(), timeout=remaining)
+        except asyncio.TimeoutError:
+            # No new audio; stop recording.
+            break
+        
+        if isinstance(chunk, str) and chunk.lower() == "end":
+            break  # client sent a termination signal
+        # Assume binary audio data.
+        audio_buffer.write(chunk)
+        elapsed = time.time() - start_time
+        await websocket.send(json.dumps({"status": "Recording", "elapsed": elapsed}))
+        
+        # If more than threshold_time has passed and it's been at least 1 second since last check:
+        if elapsed > threshold_time and (time.time() - last_match_time) >= 1:
+            # Process the current audio buffer.
+            data = audio_buffer.getvalue()
+            buf = BytesIO(data)
+            try:
+                samples, sample_rate = audio_file_to_samples(buf)
+            except Exception as e:
+                await websocket.send(json.dumps({"error": str(e)}))
+                continue
+            
+            # Generate multi-resolution fingerprints.
+            query_fps = generate_fingerprints_multiresolution(samples, sample_rate)
+            if not query_fps:
+                await websocket.send(json.dumps({"status": "No fingerprints yet."}))
+                last_match_time = time.time()
+                continue
+            
+            # Build a mapping: fingerprint hash -> list of query candidate offsets.
+            query_hashes = defaultdict(list)
+            for h, q_offset in query_fps:
+                query_hashes[h].append(q_offset)
+            hash_list = list(query_hashes.keys())
+            
+            # Split hash_list into batches for concurrent querying.
+            batch_size = 8
+            hash_batches = [hash_list[i:i+batch_size] for i in range(0, len(hash_list), batch_size)]
+            batch_results = await asyncio.gather(*(find_fingerprint_batch(batch) for batch in hash_batches))
+            db_docs = list(chain.from_iterable(batch_results))
+            # Group the DB fingerprints by hash.
+            db_group = defaultdict(list)
+            for doc in db_docs:
+                h = doc["hash"]
+                db_group[h].append((doc["song_id"], doc["offset"]))
+            
+            bin_width = 0.2  # seconds
+            global_votes = defaultdict(int)
+            for h, query_offsets in query_hashes.items():
+                if h not in db_group:
+                    continue
+                query_offsets_array = np.array(query_offsets, dtype=np.float64)
+                for song_id, db_offset in db_group[h]:
+                    votes_for_hash = accumulate_votes_for_hash(query_offsets_array, db_offset, bin_width)
+                    merge_votes(global_votes, votes_for_hash, song_id)
+            
+            if global_votes:
+                vote_counts = Counter(global_votes)
+                best_match, best_votes = vote_counts.most_common(1)[0]
+                if best_votes >= min_votes:
+                    best_song_id, best_delta = best_match
+                    song = await songs_col.find_one({"_id": best_song_id})
+                    if song:
+                        match_result = {
+                            "song": song.get("title"),
+                            "artist": song.get("artist"),
+                            "offset": best_delta,
+                            "raw_votes": best_votes
+                        }
+                        await websocket.send(json.dumps({"status": "Match found", "result": match_result}))
+                        break
+            last_match_time = time.time()
     
-    start_find = time.time()
-    batch_results = await asyncio.gather(*(find_fingerprint_batch(batch) for batch in hash_batches))
-    db_docs = list(chain.from_iterable(batch_results))
-    find_query_time = time.time() - start_find
-
-    # Group the DB fingerprints by hash.
-    db_group = defaultdict(list)
-    for doc in db_docs:
-        h = doc["hash"]
-        db_group[h].append((doc["song_id"], doc["offset"]))
-
-    bin_width = 0.2  # seconds; adjustable for offset binning
-    global_votes = defaultdict(int)
-
-    # Instead of limiting concurrency via a semaphore, run tasks concurrently for every hash.
-    async def process_hash(h, query_offsets):
-        if h not in db_group:
-            return
-        query_offsets_array = np.array(query_offsets, dtype=np.float64)
-        for song_id, db_offset in db_group[h]:
-            votes_for_hash = accumulate_votes_for_hash(query_offsets_array, db_offset, bin_width)
-            merge_votes(global_votes, votes_for_hash, song_id)
-    
-    start_match = time.time()
-    # Launch tasks concurrently for all hashes (without semaphore)
-    await asyncio.gather(*(process_hash(h, offsets) for h, offsets in query_hashes.items()))
-    match_time = time.time() - start_match
-
-    if not global_votes:
-        overall_time = time.time() - start_time
-        return jsonify({
-            "result": "No match found.",
-            "find_query_time": find_query_time,
-            "match_time": match_time,
-            "overall_time": overall_time
-        }), 200
-
-    vote_counts = Counter(global_votes)
-    best_match, best_votes = vote_counts.most_common(1)[0]
-    best_song_id, best_delta = best_match
-
-    MIN_VOTES = 30
-    if best_votes < MIN_VOTES:
-        overall_time = time.time() - start_time
-        return jsonify({
-            "result": "No match found.",
-            "find_query_time": find_query_time,
-            "match_time": match_time,
-            "overall_time": overall_time
-        }), 200
-
-    song = await songs_col.find_one({"_id": best_song_id})
-    if not song:
-        return jsonify({"result": "No match found."}), 200
-
-    total_query = len(query_fps)
-    vote_ratio = best_votes / total_query if total_query > 0 else 0
-
-    overall_time = time.time() - start_time
-    return jsonify({
-        "song": song.get("title"),
-        "artist": song.get("artist"),
-        "offset": best_delta,
-        "raw_votes": best_votes,
-        "vote_ratio": vote_ratio,
-        "find_query_time": find_query_time,
-        "match_time": match_time,
-        "overall_time": overall_time
-    }), 200
+    if not match_result:
+        await websocket.send(json.dumps({"status": "No match found after recording"}))
+    await websocket.send(json.dumps({"status": "Finished"}))
+    await websocket.close()
 
 if __name__ == "__main__":
-    # Run the Quart app with an ASGI server (e.g., uvicorn or hypercorn)
+    # Run the Quart app using an ASGI server such as uvicorn:
     # Example: uvicorn app:app --host 0.0.0.0 --port 5000
     app.run(host="0.0.0.0", port=5000, debug=False)
