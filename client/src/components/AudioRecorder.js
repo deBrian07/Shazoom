@@ -3,129 +3,179 @@ import './AudioRecorder.css';
 
 const AudioRecorder = ({ backendUrl }) => {
   const [isRecording, setIsRecording] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [headerText, setHeaderText] = useState("Tap to Shazoom");
   const [result, setResult] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+
   const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  const wsRef = useRef(null);
+  const recordingTimeoutRef = useRef(null);
   const rippleIntervalRef = useRef(null);
   const buttonWrapperRef = useRef(null);
 
-  // Function to spawn a ripple element that expands and fades out.
+  // Spawn a ripple element that expands and fades out.
   const spawnRipple = () => {
     if (!buttonWrapperRef.current) return;
     const ripple = document.createElement('div');
     ripple.className = 'ripple';
     buttonWrapperRef.current.appendChild(ripple);
-    // Remove ripple after animation completes (1.5 seconds)
     setTimeout(() => {
       ripple.remove();
     }, 1500);
   };
 
-  const startRecording = async () => {
+  // Start streaming audio via a WebSocket.
+  const startStreaming = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      setResult(null);
-      setIsLoading(false);
-
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorderRef.current.onstop = () => {
-        // When recording stops, clear the ripple spawner
-        if (rippleIntervalRef.current) {
-          clearInterval(rippleIntervalRef.current);
-        }
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        // Activate loading spinner while waiting for backend result
-        setIsLoading(true);
-        sendAudioToBackend(audioBlob);
-      };
-
-      mediaRecorderRef.current.start();
-      setIsRecording(true);
-      console.log("Recording started...");
       
-      // Spawn new ripple every 600ms while recording
-      rippleIntervalRef.current = setInterval(() => {
-        spawnRipple();
-      }, 600);
+      // Construct WebSocket URL (convert http/https to ws/wss and append '/stream')
+      let wsUrl;
+      if (backendUrl.startsWith("https://")) {
+        wsUrl = backendUrl.replace("https://", "wss://") + "/stream";
+      } else if (backendUrl.startsWith("http://")) {
+        wsUrl = backendUrl.replace("http://", "ws://") + "/stream";
+      } else {
+        wsUrl = backendUrl + "/stream";
+      }
+      
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = "arraybuffer";
+      
+      ws.onopen = () => {
+        console.log("WebSocket connected");
+        // Update header state.
+        setHeaderText("Listening...");
+        setIsRecording(true);
+
+        mediaRecorderRef.current = new MediaRecorder(stream);
+        mediaRecorderRef.current.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+            ws.send(event.data);
+          }
+        };
+        // Start sending audio chunks every 250ms.
+        mediaRecorderRef.current.start(250);
+        
+        // Start ripple effect every 600ms.
+        rippleIntervalRef.current = setInterval(() => {
+          spawnRipple();
+        }, 600);
+        
+        // Auto-stop recording after 9 seconds.
+        recordingTimeoutRef.current = setTimeout(() => {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+            mediaRecorderRef.current.stop();
+            // Stop ripple and set loading state.
+            clearInterval(rippleIntervalRef.current);
+            if (buttonWrapperRef.current) {
+              const ripples = buttonWrapperRef.current.querySelectorAll('.ripple');
+              ripples.forEach(r => r.remove());
+            }
+            setHeaderText("Shazooming...");
+            setIsLoading(true);
+          }
+        }, 9000);
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("WebSocket message:", data);
+          // Check if a final result is received (either match, error, or "No match found after recording")
+          if (data.song || data.result || data.error || (data.status && data.status === "No match found after recording")) {
+            if (data.status && data.status === "No match found after recording") {
+              // Final result indicates no match
+              setResult({ result: "No match found" });
+              // Immediately return header to idle
+              setHeaderText("Tap to Shazoom");
+            } else {
+              // Otherwise, we have a match or error.
+              setResult(data);
+              // Optionally, briefly indicate a match
+              setHeaderText("Match found");
+              setTimeout(() => {
+                setHeaderText("Tap to Shazoom");
+              }, 3000);
+            }
+            // Clean up resources.
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+              mediaRecorderRef.current.stop();
+            }
+            clearTimeout(recordingTimeoutRef.current);
+            clearInterval(rippleIntervalRef.current);
+            if (buttonWrapperRef.current) {
+              const ripples = buttonWrapperRef.current.querySelectorAll('.ripple');
+              ripples.forEach(r => r.remove());
+            }
+            ws.close();
+            setIsRecording(false);
+            setIsLoading(false);
+            return;
+          }
+          // Otherwise, ignore any interim status messages.
+        } catch (e) {
+          console.error("Error parsing WebSocket message:", e);
+        }
+      };
+      
+      ws.onerror = (e) => {
+        console.error("WebSocket error:", e);
+      };
+      
+      ws.onclose = () => {
+        console.log("WebSocket closed");
+        // Cleanup if still recording.
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
+        clearTimeout(recordingTimeoutRef.current);
+        clearInterval(rippleIntervalRef.current);
+        if (buttonWrapperRef.current) {
+          const ripples = buttonWrapperRef.current.querySelectorAll('.ripple');
+          ripples.forEach(r => r.remove());
+        }
+        setIsRecording(false);
+      };
+
+      wsRef.current = ws;
     } catch (error) {
       console.error("Error accessing microphone:", error);
       alert("Unable to access microphone. Please grant permission.");
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      console.log("Recording stopped.");
+  // Clicking the record button starts streaming if not already recording.
+  const handleRecordClick = () => {
+    if (!isRecording) {
+      setResult(null);
+      setIsLoading(false);
+      setHeaderText("Listening...");
+      startStreaming();
     }
   };
 
-  const sendAudioToBackend = (audioBlob) => {
-    const formData = new FormData();
-    formData.append("audio", audioBlob, "recording.webm");
-
-    fetch(`${backendUrl}/identify`, {
-      method: 'POST',
-      body: formData,
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("Server response:", data);
-        setIsLoading(false);
-        if (data.song && data.artist) {
-          setResult(`Recognized Song: ${data.song} by ${data.artist}`);
-        } else if (data.result) {
-          setResult(data.result);
-        } else if (data.error) {
-          setResult(`Error: ${data.error}`);
-        }
-      })
-      .catch((err) => {
-        console.error("Error sending audio data:", err);
-        setIsLoading(false);
-        setResult("There was an error identifying the song.");
-      });
-  };
-
-  // Compute header text based on state.
-  let titleText = "Tap to Shazoom";
-  if (isLoading) {
-    titleText = "Shazooming...";
-  } else if (isRecording) {
-    titleText = "Listening...";
-  }
-
   return (
     <div className="audio-recorder">
-      <h2 className="recorder-title">{titleText}</h2>
-      {/* Button-wrapper allows ripples and spinner to expand outside the button */}
+      <h2 className="recorder-title">{headerText}</h2>
       <div ref={buttonWrapperRef} className="button-wrapper">
-        { !isRecording ? (
-          <button 
-            onClick={startRecording} 
-            className={`record-button ${isLoading ? 'loading' : ''}`} 
-          />
-        ) : (
-          <button 
-            onClick={stopRecording} 
-            className={`stop-button ${isLoading ? 'loading' : ''}`}
-          >
-            ⏹
-          </button>
-        )}
+        <button
+          onClick={handleRecordClick}
+          className={`record-button ${isRecording ? 'recording' : ''} ${isLoading ? 'loading' : ''}`}
+          disabled={isRecording}
+        />
       </div>
       {result && (
         <div className="result">
-          <p>{result}</p>
+          {result.status === "Match found" && result.result ? (
+            <p>
+              Recognized Song: {result.result.song} by {result.result.artist}
+            </p>
+          ) : result.error ? (
+            <p>Error: {result.error}</p>
+          ) : (
+            <p>No match found</p>
+          )}
         </div>
       )}
     </div>
