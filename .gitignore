@@ -1,3 +1,4 @@
 /server/download/downloads
 /server/venv
+/server/database/__pycache__
 server/__pycache__/app.cpython-311.pyc
