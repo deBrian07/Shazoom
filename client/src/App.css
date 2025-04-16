@@ -1,16 +1,14 @@
 .App {
-  min-height: 100vh;           /* Fill the entire viewport height */
+  min-height: 100vh;         
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   text-align: center;
-  /* Shazam-like gradient (top to bottom) */
   background: linear-gradient(180deg, #00b3ff 0%, #0066ff 100%);
   font-family: 'Helvetica Neue', Arial, sans-serif;
 }
 
-/* Header text: "Tap to Shazam" style */
 .App-header {
   padding: 2rem 1rem 1rem;
   font-size: 2rem;
@@ -20,7 +18,7 @@
 }
 
 .main-content {
-  flex: 1;             /* Make this area grow to fill remaining space */
+  flex: 1;             
   display: flex;
   justify-content: center;
   align-items: center;

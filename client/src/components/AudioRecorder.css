@@ -22,7 +22,7 @@
     overflow: visible;
   }
   
-  /* Common button styles */
+  /* Buttons */
   .record-button,
   .stop-button {
     width: 200px;
@@ -43,27 +43,18 @@
     overflow: visible;
   }
   
-  /* Record button: uses custom microphone PNG */
   .record-button {
     background-image: url('/public/Microphone.png');
     background-size: 90%;
   }
   
-  /* Stop button: no background image, large stop icon */
-  .stop-button {
-    background: none;
-    font-size: 10rem;
-    color: #fff;
-  }
-  
-  /* Hover effects */
   .record-button:hover,
   .stop-button:hover {
     transform: scale(1.08);
     box-shadow: 0 12px 25px rgba(0, 0, 0, 0.4);
   }
   
-  /* Ripple effect: each spawned ripple expands and fades */
+  /* Ripple effect */
   .ripple {
     position: absolute;
     top: 50%;
@@ -90,7 +81,6 @@
     }
   }
   
-  /* Loading spinner effect (used when isLoading is true) */
   .record-button.loading,
   .stop-button.loading {
     position: relative;

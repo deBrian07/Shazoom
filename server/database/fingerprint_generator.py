@@ -7,15 +7,6 @@ import concurrent.futures
 from utils import audio_file_to_samples, generate_fingerprints_multiresolution
 
 def process_song(song, songs_col, fingerprints_col):
-    """
-    Processes a single song:
-      - Checks for duplicates.
-      - Loads the audio file.
-      - Generates multi-resolution fingerprints using the enhanced function.
-      - Inserts song metadata and fingerprint documents into MongoDB.
-    
-    Returns a message.
-    """
     if songs_col.find_one({"title": song["title"], "artist": song["artist"]}):
         return f"Skipping '{song['title']}' by {song['artist']}: Already exists."
     
@@ -55,7 +46,6 @@ def main():
     fingerprints_col = db["fingerprints"]
     fingerprints_col.create_index("hash")
     
-    # Read CSV file with headers: "song name", "artist", "wav file location"
     csv_path = os.path.join("..", "download", "processed.csv")
     songs_to_add = []
     try:
@@ -72,7 +62,6 @@ def main():
         return
     
     results = []
-    # Process songs concurrently.
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         futures = [executor.submit(process_song, song, songs_col, fingerprints_col)
                    for song in songs_to_add]

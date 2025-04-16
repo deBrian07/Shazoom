@@ -13,7 +13,6 @@ const AudioRecorder = ({ backendUrl }) => {
   const rippleIntervalRef = useRef(null);
   const buttonWrapperRef = useRef(null);
 
-  // Spawn a ripple element that expands and fades out.
   const spawnRipple = () => {
     if (!buttonWrapperRef.current) return;
     const ripple = document.createElement('div');
@@ -24,12 +23,12 @@ const AudioRecorder = ({ backendUrl }) => {
     }, 1500);
   };
 
-  // Start streaming audio via a WebSocket.
+  // start streaming audio using websocket
   const startStreaming = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      // Construct WebSocket URL (convert http/https to ws/wss and append '/stream')
+      // Construct WebSocket URL
       let wsUrl;
       if (backendUrl.startsWith("https://")) {
         wsUrl = backendUrl.replace("https://", "wss://") + "/stream";
@@ -44,7 +43,6 @@ const AudioRecorder = ({ backendUrl }) => {
       
       ws.onopen = () => {
         console.log("WebSocket connected");
-        // Update header state.
         setHeaderText("Listening...");
         setIsRecording(true);
 
@@ -54,15 +52,15 @@ const AudioRecorder = ({ backendUrl }) => {
             ws.send(event.data);
           }
         };
-        // Start sending audio chunks every 250ms.
+        // sending audio chunks every 250ms.
         mediaRecorderRef.current.start(250);
         
-        // Start ripple effect every 600ms.
+        // ripple effect every 600ms.
         rippleIntervalRef.current = setInterval(() => {
           spawnRipple();
         }, 600);
         
-        // Auto-stop recording after 9 seconds.
+        // stop recording after 9s
         recordingTimeoutRef.current = setTimeout(() => {
           if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
             mediaRecorderRef.current.stop();
@@ -82,23 +80,17 @@ const AudioRecorder = ({ backendUrl }) => {
         try {
           const data = JSON.parse(event.data);
           console.log("WebSocket message:", data);
-          // Check if a final result is received (either match, error, or "No match found after recording")
           if (data.song || data.result || data.error || (data.status && data.status === "No match found after recording")) {
             if (data.status && data.status === "No match found after recording") {
-              // Final result indicates no match
               setResult({ result: "No match found" });
-              // Immediately return header to idle
               setHeaderText("Tap to Shazoom");
             } else {
-              // Otherwise, we have a match or error.
               setResult(data);
-              // Optionally, briefly indicate a match
               setHeaderText("Match found");
               setTimeout(() => {
                 setHeaderText("Tap to Shazoom");
               }, 3000);
             }
-            // Clean up resources.
             if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
               mediaRecorderRef.current.stop();
             }
@@ -113,7 +105,6 @@ const AudioRecorder = ({ backendUrl }) => {
             setIsLoading(false);
             return;
           }
-          // Otherwise, ignore any interim status messages.
         } catch (e) {
           console.error("Error parsing WebSocket message:", e);
         }
@@ -125,7 +116,6 @@ const AudioRecorder = ({ backendUrl }) => {
       
       ws.onclose = () => {
         console.log("WebSocket closed");
-        // Cleanup if still recording.
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
           mediaRecorderRef.current.stop();
         }
