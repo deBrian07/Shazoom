@@ -6,7 +6,6 @@ from pydub import AudioSegment
 from numba import njit, types
 from numba.typed import Dict as TypedDict
 
-# --- Pre-processing functions ---
 def low_pass_filter(samples, cutoff, sample_rate):
     """Applies a first‐order low‐pass filter with cutoff frequency (Hz)."""
     rc = 1.0 / (2 * np.pi * cutoff)
@@ -24,7 +23,6 @@ def downsample(samples, original_rate, target_rate):
     return np.array([np.mean(samples[i:i+ratio]) for i in range(0, len(samples), ratio)])
 
 
-# --- Audio loading ---
 def audio_file_to_samples(file_obj):
     """
     Loads an audio file from a file-like object and converts it to mono.
@@ -48,12 +46,10 @@ def audio_file_to_samples(file_obj):
     else:
         samples = samples.astype(np.float32)
     
-    # Pre-filter and downsample
     filtered_samples = low_pass_filter(samples, cutoff=5000, sample_rate=44100)
     downsampled_samples = downsample(filtered_samples, original_rate=44100, target_rate=44100 // 4)  # -> ~11025 Hz
     return downsampled_samples, 44100 // 4  # Effective rate
 
-# --- Fingerprint Generation ---
 def generate_fingerprints(samples, sample_rate,
                           threshold_multiplier=3,   # Adaptive multiplier (try tuning between 3 and 4)
                           filter_coef=0.5,            # Global filtering coefficient
@@ -62,24 +58,8 @@ def generate_fingerprints(samples, sample_rate,
                           window_size=4096,           # FFT window length (samples) (for high frequency resolution)
                           hop_size=1024,              # Hop size (for temporal resolution)
                           band_boundaries=None):
-    """
-    Generates fingerprints using adaptive candidate extraction and sliding-window pairing.
     
-    Changes compared to your old version:
-      - The signal is assumed to be downsampled (≈11.025 kHz) from audio_file_to_samples.
-      - The spectrogram is computed with a Hamming window.
-      - Adaptive thresholding now uses median + (threshold_multiplier * std) per time slice.
-      - Candidate extraction is performed in predefined bands in terms of FFT bins.
-      
-    For the bands, if there are at least 512 bins (up to 5000 Hz) the default is set to:
-         [0, 10, 20, 40, 80, 160, 512]
-    Otherwise, the boundaries are scaled proportionally.
-    
-    Returns:
-      A list of tuples (hash_str, candidate_time)
-      where hash_str has the form: "int(anchor_freq):int(candidate_freq):int(delta_t*100)"
-    """
-    # Compute spectrogram with a Hamming window.
+    # spectrogram with a Hamming window.
     hamming_window = np.hamming(window_size)
     freqs, times, spec = signal.spectrogram(
         samples, fs=sample_rate, window=hamming_window,
@@ -93,7 +73,7 @@ def generate_fingerprints(samples, sample_rate,
         return []
     max_bin = valid_idx[-1] + 1
     freqs = freqs[:max_bin]
-    spec = spec[:max_bin, :]  # shape: (n_bins, n_times)
+    spec = spec[:max_bin, :] 
     
     # Set band boundaries in terms of FFT bin indices.
     if band_boundaries is None:
@@ -103,14 +83,14 @@ def generate_fingerprints(samples, sample_rate,
             factor = max_bin / 512.0
             band_boundaries = [int(b * factor) for b in [0, 10, 20, 40, 80, 160, 512]]
     
-    # Apply 2D maximum filter to detect local maxima.
+    # 2D maximum filter
     local_max = (spec == maximum_filter(spec, size=(3, 3)))
     n_times = spec.shape[1]
-    candidates = []  # List of tuples: (time, frequency, amplitude)
+    candidates = [] 
     
     for t_idx in range(n_times):
         spectrum = spec[:, t_idx]
-        # Adaptive threshold using median instead of mean improves robustness.
+        # Adaptive threshold 
         amp_threshold = np.median(spectrum) + (threshold_multiplier * np.std(spectrum))
         local_peaks = np.where((local_max[:, t_idx]) & (spectrum >= amp_threshold))[0]
         slice_candidates = []
@@ -136,7 +116,6 @@ def generate_fingerprints(samples, sample_rate,
     
     filtered_candidates.sort(key=lambda x: x[0])
     
-    # Pair candidates in a sliding-window (target zone) approach.
     fingerprints = []
     N = len(filtered_candidates)
     for i in range(N):
@@ -154,17 +133,6 @@ def generate_fingerprints(samples, sample_rate,
     return fingerprints
 
 def generate_fingerprints_multiresolution(samples, sample_rate):
-    """
-    Generates fingerprints at multiple resolutions and returns the union.
-    Each configuration is tagged with a version identifier.
-    
-    Two configurations are used:
-        - "high_freq": longer window (4096) for high frequency resolution.
-        - "high_time": shorter window (1024) for higher temporal resolution.
-    
-    Returns:
-      A list of tuples (hash_str, candidate_time)
-    """
     configs = [
         (4096, 1024, "high_freq"),
         (1024, 256, "high_time")
@@ -173,15 +141,14 @@ def generate_fingerprints_multiresolution(samples, sample_rate):
     for window_size, hop_size, version in configs:
         fps = generate_fingerprints(
             samples, sample_rate,
-            threshold_multiplier=4,  # Tune if necessary
-            filter_coef=0.7,         # Tune if necessary
+            threshold_multiplier=4,  # Tune 
+            filter_coef=0.7,         # Tune 
             fanout=7,                # Tune: smaller fanout yields fewer pairings
             window_secs=5.0,
             window_size=window_size,
             hop_size=hop_size,
-            band_boundaries=None  # Defaults to our predefined bin boundaries.
+            band_boundaries=None  
         )
-        # Append version information to each fingerprint.
         fps_with_version = [(f"{hash_str}:{version}", candidate_time) for (hash_str, candidate_time) in fps]
         all_fps.extend(fps_with_version)
     return all_fps
@@ -195,10 +162,8 @@ def accumulate_votes_for_hash(query_offsets, db_offset, bin_width):
     (We use numba.typed.Dict as a typed dictionary.)
     """
     votes = TypedDict.empty(key_type=types.float64, value_type=types.int64)
-    # For each query offset, compute the delta and its binned value.
     for i in range(query_offsets.shape[0]):
         delta = db_offset - query_offsets[i]
-        # Here we use Python's built-in round; in numba, it returns a float.
         binned_delta = round(delta / bin_width) * bin_width
         if binned_delta in votes:
             votes[binned_delta] += 1
@@ -207,10 +172,6 @@ def accumulate_votes_for_hash(query_offsets, db_offset, bin_width):
     return votes
 
 def merge_votes(global_votes, new_votes, song_id):
-    """
-    Merges votes from new_votes (a numba typed dict) into the global_votes dictionary.
-    The keys of global_votes are tuples (song_id, binned_delta).
-    """
     for key in new_votes:
         global_key = (song_id, key)
         global_votes[global_key] = global_votes.get(global_key, 0) + new_votes[key]

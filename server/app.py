@@ -18,11 +18,10 @@ from io import BytesIO
 import json
 
 app = Quart(__name__)
-# Allow both the local frontend and your GitHub-hosted site.
 allowed_origins = ["http://localhost:3000", "https://debrian07.github.io"]
 app = cors(app, allow_origin=allowed_origins)
 
-# MongoDB connection using Motor.
+# MongoDB connection
 MONGO_URI = "mongodb://localhost:27017"
 client = AsyncIOMotorClient(MONGO_URI)
 DEV_MODE = False
@@ -63,34 +62,29 @@ async def stream():
     start_time = time.time()
     last_match_time = time.time()
     match_result = None
-    max_recording = 9.0  # seconds maximum recording duration
-    threshold_time = 4.0  # wait at least 4 seconds before first matching check
-    min_votes = 40        # require at least 35 votes to return a match
+    max_recording = 9.0  
+    threshold_time = 4.0 
+    min_votes = 40      
     
     await websocket.send(json.dumps({"status": "Recording started"}))
     
     while True:
-        # Determine remaining time (if any)
         remaining = max_recording - (time.time() - start_time)
         if remaining <= 0:
             break
         try:
-            # Wait for an incoming chunk with a timeout set to remaining time.
             chunk = await asyncio.wait_for(websocket.receive(), timeout=remaining)
         except asyncio.TimeoutError:
-            # No new audio; stop recording.
+            # No new audio, stop recording.
             break
         
         if isinstance(chunk, str) and chunk.lower() == "end":
-            break  # client sent a termination signal
-        # Assume binary audio data.
+            break  
         audio_buffer.write(chunk)
         elapsed = time.time() - start_time
         await websocket.send(json.dumps({"status": "Recording", "elapsed": elapsed}))
         
-        # If more than threshold_time has passed and it's been at least 1 second since last check:
         if elapsed > threshold_time and (time.time() - last_match_time) >= 1:
-            # Process the current audio buffer.
             data = audio_buffer.getvalue()
             buf = BytesIO(data)
             try:
@@ -99,25 +93,21 @@ async def stream():
                 await websocket.send(json.dumps({"error": str(e)}))
                 continue
             
-            # Generate multi-resolution fingerprints.
             query_fps = generate_fingerprints_multiresolution(samples, sample_rate)
             if not query_fps:
                 await websocket.send(json.dumps({"status": "No fingerprints yet."}))
                 last_match_time = time.time()
                 continue
             
-            # Build a mapping: fingerprint hash -> list of query candidate offsets.
             query_hashes = defaultdict(list)
             for h, q_offset in query_fps:
                 query_hashes[h].append(q_offset)
             hash_list = list(query_hashes.keys())
             
-            # Split hash_list into batches for concurrent querying.
             batch_size = 8
             hash_batches = [hash_list[i:i+batch_size] for i in range(0, len(hash_list), batch_size)]
             batch_results = await asyncio.gather(*(find_fingerprint_batch(batch) for batch in hash_batches))
             db_docs = list(chain.from_iterable(batch_results))
-            # Group the DB fingerprints by hash.
             db_group = defaultdict(list)
             for doc in db_docs:
                 h = doc["hash"]
@@ -156,6 +146,5 @@ async def stream():
     await websocket.close()
 
 if __name__ == "__main__":
-    # Run the Quart app using an ASGI server such as uvicorn:
-    # Example: uvicorn app:app --host 0.0.0.0 --port 5000
+    # uvicorn app:app --host 0.0.0.0 --port 5000
     app.run(host="0.0.0.0", port=5000, debug=False)
