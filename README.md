@@ -16,7 +16,7 @@ npm install
 ```
 cd server
 source venv/bin/activate
-python3 app.py
+uvicorn app:app --host 0.0.0.0 --port 5000
 ```
 ### Running Frontend 
 ```
