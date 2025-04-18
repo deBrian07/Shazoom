@@ -107,8 +107,8 @@ html[data-theme="dark"] .record-button:hover {
   left: 50%;
   width: 200px;
   height: 200px;
-  margin-left: -100px;
-  margin-top: -100px;
+  margin-left: -106px;
+  margin-top: -106px;
   border: 4px solid var(--ripple-border-light);
   border-radius: 50%;
   pointer-events: none;
@@ -128,8 +128,8 @@ html[data-theme="dark"] .ripple {
 .record-button.loading::after {
   content: "";
   position: absolute;
-  top: -24px;
-  left: -24px;
+  top: -30px;
+  left: -30px;
   width: calc(100% + 48px);
   height: calc(100% + 48px);
   border: 6px solid var(--spinner-bg-light);
