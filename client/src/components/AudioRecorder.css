@@ -25,6 +25,7 @@
 
 html[data-theme="dark"] .App-header {
   background: var(--bg-dark);         /* dark‑mode solid  */
+  transition: background 0.3s;
 }
 
 .App{
@@ -34,7 +35,8 @@ html[data-theme="dark"] .App-header {
 }
 /* dark‑mode: flat dark fill */
 html[data-theme="dark"] .App{
-  background:#091E2B;
+  background:linear-gradient(180deg, #1e6aff 0%, #091E2B 100%);
+  transition: background 0.3s;
 }
 
 /* Audio recorder background: solid colors */
