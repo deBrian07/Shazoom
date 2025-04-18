@@ -1,116 +1,231 @@
+/* AudioRecorder.css */
+
+/* Theme variables */
+:root {
+  --bg-light: #5FAEFF;
+  --bg-dark: #091E2B;
+  --header-gradient: linear-gradient(180deg, #3EA0FF, #0052D4);
+  --text-light: #FFFFFF;
+  --text-dark: #FFFFFF;
+  --button-bg-light: rgba(255, 255, 255, 0.15);
+  --button-bg-dark: rgba(255, 255, 255, 0.10);
+  --button-hover-light: rgba(255, 255, 255, 0.25);
+  --button-hover-dark: rgba(255, 255, 255, 0.20);
+  --ripple-border-light: rgba(255, 255, 255, 0.7);
+  --ripple-border-dark: rgba(255, 255, 255, 0.5);
+  --spinner-bg-light: rgba(255, 255, 255, 0.3);
+  --spinner-bg-dark: rgba(255, 255, 255, 0.2);
+}
+
+/* Header gradient always uses gradient */
+.App-header {
+  background: transparent;
+  transition: background 0.3s;
+}
+
+html[data-theme="dark"] .App-header {
+  background: var(--bg-dark);         /* dark‑mode solid  */
+}
+
+.App{
+  /* NEW */
+  background: linear-gradient(180deg,#69b4ff 0%,#1e6aff 100%);
+  transition: background .3s;
+}
+/* dark‑mode: flat dark fill */
+html[data-theme="dark"] .App{
+  background:#091E2B;
+}
+
+/* Audio recorder background: solid colors */
 .audio-recorder {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    max-width: 400px;
-    margin: 0 auto;
-  }
-  
-  .recorder-title {
-    font-size: 1.2rem;
-    color: #fff;
-    margin-bottom: 2rem;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-    min-height: 1.5em;
-  }
-  
-  /* Container that allows ripple and spinner effects to expand outside the button */
-  .button-wrapper {
-    position: relative;
-    display: inline-block;
-    overflow: visible;
-  }
-  
-  /* Buttons */
-  .record-button,
-  .stop-button {
-    width: 200px;
-    height: 200px;
-    border: none;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.15);
-    backdrop-filter: blur(8px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
-    cursor: pointer;
-    transition: transform 0.3s, box-shadow 0.3s;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: 50%;
-    overflow: visible;
-  }
-  
-  .record-button {
-    background-image: url('/public/Microphone.png');
-    background-size: 90%;
-  }
-  
-  .record-button:hover,
-  .stop-button:hover {
-    transform: scale(1.08);
-    box-shadow: 0 12px 25px rgba(0, 0, 0, 0.4);
-  }
-  
-  /* Ripple effect */
-  .ripple {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 200px;    /* matches button width at start */
-    height: 200px;
-    margin-left: -104px;
-    margin-top: -104px;
-    border: 4px solid rgba(255, 255, 255, 0.7);
-    border-radius: 50%;
-    pointer-events: none;
-    z-index: 0;
-    animation: ripple-animation 1s ease-out forwards;
-  }
-  
-  @keyframes ripple-animation {
-    0% {
-      transform: scale(1);
-      opacity: 0.7;
-    }
-    100% {
-      transform: scale(2);
-      opacity: 0;
-    }
-  }
-  
-  .record-button.loading,
-  .stop-button.loading {
-    position: relative;
-  }
-  
-  .record-button.loading::after,
-  .stop-button.loading::after {
-    content: "";
-    position: absolute;
-    top: -24px;
-    left: -24px;
-    width: calc(100% + 40px);
-    height: calc(100% + 40px);
-    border: 6px solid rgba(255, 255, 255, 0.3);
-    border-top: 6px solid #fff;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    z-index: 1;
-  }
-  
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-  
-  .result {
-    margin-top: 2rem;
-    font-size: 1.1rem;
-    color: #fff;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
-    text-align: center;
-    max-width: 80%;
-  }  
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 60px;
+  min-height: 100vh;
+  background: transparent;
+  transition: background 0.3s;
+}
+
+/* Dark‑mode: keep flat dark background */
+html[data-theme="dark"] .audio-recorder {
+  background: var(--bg-dark);
+}
+
+.recorder-title {
+  font-size: 1.2rem;
+  color: var(--text-light);
+  margin-bottom: 2rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  min-height: 1.5em;
+  transition: color 0.3s;
+}
+html[data-theme="dark"] .recorder-title {
+  color: var(--text-dark);
+}
+
+.button-wrapper {
+  position: relative;
+  display: inline-block;
+  overflow: visible;
+}
+
+.record-button {
+  width: 200px;
+  height: 200px;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--button-bg-light);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: transform 0.3s, background-color 0.3s;
+  background-image: url('/public/buttons/Microphone.png');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 90%;
+}
+html[data-theme="dark"] .record-button {
+  background-color: var(--button-bg-dark);
+}
+
+.record-button:hover {
+  transform: scale(1.08);
+  background-color: var(--button-hover-light);
+}
+html[data-theme="dark"] .record-button:hover {
+  background-color: var(--button-hover-dark);
+}
+
+.ripple {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 200px;
+  height: 200px;
+  margin-left: -100px;
+  margin-top: -100px;
+  border: 4px solid var(--ripple-border-light);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: ripple-animation 1s ease-out forwards;
+}
+html[data-theme="dark"] .ripple {
+  border-color: var(--ripple-border-dark);
+}
+@keyframes ripple-animation {
+  0% { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+.record-button.loading {
+  position: relative;
+}
+.record-button.loading::after {
+  content: "";
+  position: absolute;
+  top: -24px;
+  left: -24px;
+  width: calc(100% + 48px);
+  height: calc(100% + 48px);
+  border: 6px solid var(--spinner-bg-light);
+  border-top: 6px solid var(--text-light);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  z-index: 1;
+}
+html[data-theme="dark"] .record-button.loading::after {
+  border: 6px solid var(--spinner-bg-dark);
+  border-top: 6px solid var(--text-dark);
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.result {
+  margin-top: 2rem;
+  font-size: 1.1rem;
+  color: var(--text-light);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  text-align: center;
+  transition: color 0.3s;
+}
+html[data-theme="dark"] .result {
+  color: var(--text-dark);
+}
+
+/* Hamburger & drawer */
+.hamburger {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  font-size: 1.5rem;
+  color: var(--text-light);
+  cursor: pointer;
+  z-index: 1000;
+  transition: color 0.3s;
+}
+html[data-theme="dark"] .hamburger {
+  color: var(--text-dark);
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  left: -260px;
+  width: 260px;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.8);
+  color: #000;
+  transition: left 0.3s ease;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  padding-top: 40px;
+}
+html[data-theme="dark"] .drawer {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.drawer.open { left: 0; }
+.close-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: transparent;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+.mode-options {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding: 1rem;
+}
+.mode-options button {
+  width: 48px;
+  height: 48px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.2s;
+}
+.mode-options button.active {
+  border-color: #007aff;
+}
+.mode-options button img {
+  width: 24px;
+  height: 24px;
+}
+
+html, body, #root, .App {
+  height: 100%;
+  margin: 0;
+}

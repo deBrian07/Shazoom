@@ -1,153 +1,204 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import './AudioRecorder.css';
 
 const AudioRecorder = ({ backendUrl }) => {
+  /* -------------------------------------------------- */
+  /*  UI state                                          */
+  /* -------------------------------------------------- */
   const [isRecording, setIsRecording] = useState(false);
-  const [headerText, setHeaderText] = useState("Tap to Shazoom");
-  const [result, setResult] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [headerText, setHeaderText]   = useState('Tap to Shazoom');
+  const [result, setResult]           = useState(null);
+  const [isLoading, setIsLoading]     = useState(false);
 
-  const mediaRecorderRef = useRef(null);
-  const wsRef = useRef(null);
-  const recordingTimeoutRef = useRef(null);
-  const rippleIntervalRef = useRef(null);
-  const buttonWrapperRef = useRef(null);
+  const [showMenu, setShowMenu]       = useState(false);
+  const [theme, setTheme]             = useState('auto');           // 'light' | 'dark' | 'auto'
 
+  /* -------------------------------------------------- */
+  /*  refs                                              */
+  /* -------------------------------------------------- */
+  const mediaRecorderRef   = useRef(null);
+  const wsRef              = useRef(null);
+  const recordingTimeout   = useRef(null);
+  const rippleInterval     = useRef(null);
+  const buttonWrapperRef   = useRef(null);
+  const mqDark             = useRef(null);                          // matchMedia listener for auto‑theme
+
+  /* -------------------------------------------------- */
+  /*  THEME handling                                    */
+  /* -------------------------------------------------- */
+  useEffect(() => {
+    const applyTheme = mode => {
+      if (mode === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      } else {                                  // light *or* auto‑light
+        document.documentElement.removeAttribute('data-theme');
+      }
+    };
+
+    /* first run ------------------------------------- */
+    if (theme === 'auto') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      applyTheme(prefersDark ? 'dark' : 'light');
+    } else {
+      applyTheme(theme);
+    }
+
+    /* listen to OS change when in auto mode --------- */
+    if (theme === 'auto' && window.matchMedia) {
+      mqDark.current = window.matchMedia('(prefers-color-scheme: dark)');
+      const handler = e => applyTheme(e.matches ? 'dark' : 'light');
+      mqDark.current.addEventListener('change', handler);
+      return () => mqDark.current.removeEventListener('change', handler);
+    }
+  }, [theme]);
+
+  /* -------------------------------------------------- */
+  /*  ripple helper                                     */
+  /* -------------------------------------------------- */
   const spawnRipple = () => {
     if (!buttonWrapperRef.current) return;
-    const ripple = document.createElement('div');
-    ripple.className = 'ripple';
-    buttonWrapperRef.current.appendChild(ripple);
-    setTimeout(() => {
-      ripple.remove();
-    }, 1500);
+    const el = document.createElement('div');
+    el.className = 'ripple';
+    buttonWrapperRef.current.appendChild(el);
+    setTimeout(() => el.remove(), 1500);
   };
 
-  // start streaming audio using websocket
+  /* -------------------------------------------------- */
+  /*  main streaming logic                              */
+  /* -------------------------------------------------- */
   const startStreaming = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
-      // Construct WebSocket URL
-      let wsUrl;
-      if (backendUrl.startsWith("https://")) {
-        wsUrl = backendUrl.replace("https://", "wss://") + "/stream";
-      } else if (backendUrl.startsWith("http://")) {
-        wsUrl = backendUrl.replace("http://", "ws://") + "/stream";
-      } else {
-        wsUrl = backendUrl + "/stream";
-      }
-      
+
+      /* build WebSocket url ------------------------- */
+      const wsUrl = backendUrl.replace(/^http(s?):/, m => (m === 'https:' ? 'wss:' : 'ws:')) + '/stream';
+
       const ws = new WebSocket(wsUrl);
-      ws.binaryType = "arraybuffer";
-      
+      ws.binaryType = 'arraybuffer';
+
       ws.onopen = () => {
-        console.log("WebSocket connected");
-        setHeaderText("Listening...");
+        setHeaderText('Listening...');
         setIsRecording(true);
 
         mediaRecorderRef.current = new MediaRecorder(stream);
-        mediaRecorderRef.current.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-            ws.send(event.data);
-          }
+        mediaRecorderRef.current.ondataavailable = e => {
+          if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
         };
-        // sending audio chunks every 250ms.
         mediaRecorderRef.current.start(250);
-        
-        // ripple effect every 600ms.
-        rippleIntervalRef.current = setInterval(() => {
-          spawnRipple();
-        }, 600);
-        
-        // stop recording after 9s
-        recordingTimeoutRef.current = setTimeout(() => {
-          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+
+        rippleInterval.current   = setInterval(spawnRipple, 600);
+        recordingTimeout.current = setTimeout(() => {
+          if (mediaRecorderRef.current?.state !== 'inactive') {
             mediaRecorderRef.current.stop();
-            // Stop ripple and set loading state.
-            clearInterval(rippleIntervalRef.current);
-            if (buttonWrapperRef.current) {
-              const ripples = buttonWrapperRef.current.querySelectorAll('.ripple');
-              ripples.forEach(r => r.remove());
-            }
-            setHeaderText("Shazooming...");
+            clearInterval(rippleInterval.current);
+            buttonWrapperRef.current?.querySelectorAll('.ripple').forEach(r => r.remove());
+            setHeaderText('Shazooming...');
             setIsLoading(true);
           }
         }, 9000);
       };
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log("WebSocket message:", data);
-          if (data.song || data.result || data.error || (data.status && data.status === "No match found after recording")) {
-            if (data.status && data.status === "No match found after recording") {
-              setResult({ result: "No match found" });
-              setHeaderText("Tap to Shazoom");
-            } else {
-              setResult(data);
-              setHeaderText("Match found");
-              setTimeout(() => {
-                setHeaderText("Tap to Shazoom");
-              }, 3000);
-            }
-            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-              mediaRecorderRef.current.stop();
-            }
-            clearTimeout(recordingTimeoutRef.current);
-            clearInterval(rippleIntervalRef.current);
-            if (buttonWrapperRef.current) {
-              const ripples = buttonWrapperRef.current.querySelectorAll('.ripple');
-              ripples.forEach(r => r.remove());
-            }
-            ws.close();
-            setIsRecording(false);
-            setIsLoading(false);
-            return;
+
+      ws.onmessage = evt => {
+        const data = JSON.parse(evt.data);
+
+        if (
+          data.song ||
+          data.result ||
+          data.error ||
+          data.status === 'No match found after recording'
+        ) {
+          /* ------ display result ------------------- */
+          if (data.status === 'No match found after recording') {
+            setResult({ result: 'No match found' });
+          } else if (data.song) {
+            setResult({ song: data.song, artist: data.artist });
+          } else if (data.result?.song) {
+            setResult({ song: data.result.song, artist: data.result.artist });
+          } else if (data.error) {
+            setResult({ error: data.error });
           }
-        } catch (e) {
-          console.error("Error parsing WebSocket message:", e);
+
+          /* ------ cleanup -------------------------- */
+          setHeaderText('Tap to Shazoom');
+          mediaRecorderRef.current?.state !== 'inactive' && mediaRecorderRef.current.stop();
+          clearTimeout(recordingTimeout.current);
+          clearInterval(rippleInterval.current);
+          buttonWrapperRef.current?.querySelectorAll('.ripple').forEach(r => r.remove());
+          setIsRecording(false);
+          setIsLoading(false);
+          ws.close();
         }
       };
-      
-      ws.onerror = (e) => {
-        console.error("WebSocket error:", e);
-      };
-      
+
+      ws.onerror = e => console.error('WebSocket error:', e);
+
       ws.onclose = () => {
-        console.log("WebSocket closed");
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-          mediaRecorderRef.current.stop();
-        }
-        clearTimeout(recordingTimeoutRef.current);
-        clearInterval(rippleIntervalRef.current);
-        if (buttonWrapperRef.current) {
-          const ripples = buttonWrapperRef.current.querySelectorAll('.ripple');
-          ripples.forEach(r => r.remove());
-        }
+        mediaRecorderRef.current?.state !== 'inactive' && mediaRecorderRef.current.stop();
+        clearTimeout(recordingTimeout.current);
+        clearInterval(rippleInterval.current);
+        buttonWrapperRef.current?.querySelectorAll('.ripple').forEach(r => r.remove());
         setIsRecording(false);
       };
 
       wsRef.current = ws;
-    } catch (error) {
-      console.error("Error accessing microphone:", error);
-      alert("Unable to access microphone. Please grant permission.");
+    } catch (err) {
+      console.error(err);
+      alert('Unable to access microphone.');
     }
   };
 
-  // Clicking the record button starts streaming if not already recording.
+  /* -------------------------------------------------- */
+  /*  click handler                                     */
+  /* -------------------------------------------------- */
   const handleRecordClick = () => {
     if (!isRecording) {
       setResult(null);
       setIsLoading(false);
-      setHeaderText("Listening...");
+      setHeaderText('Listening...');
       startStreaming();
     }
   };
 
+  /* -------------------------------------------------- */
+  /*  JSX                                               */
+  /* -------------------------------------------------- */
   return (
     <div className="audio-recorder">
+      {/* ☰ hamburger */}
+      <div className="hamburger" onClick={() => setShowMenu(true)}>☰</div>
+
+      {/* sliding drawer */}
+      <div className={`drawer ${showMenu ? 'open' : ''}`}>
+        <button className="close-btn" onClick={() => setShowMenu(false)}>✕</button>
+        <h3 style={{ textAlign: 'center', marginTop: '2rem' }}>Settings</h3>
+
+        <div className="mode-options">
+          <button
+            className={theme === 'light' ? 'active' : ''}
+            onClick={() => setTheme('light')}
+          >
+            <img src="/buttons/light_mode.png" alt="Light" />
+          </button>
+
+          <button
+            className={theme === 'dark' ? 'active' : ''}
+            onClick={() => setTheme('dark')}
+          >
+            <img src="/buttons/dark_mode.png" alt="Dark" />
+          </button>
+
+          <button
+            className={theme === 'auto' ? 'active' : ''}
+            onClick={() => setTheme('auto')}
+          >
+            Auto
+          </button>
+        </div>
+      </div>
+
+      {/* main UI ------------------------------------- */}
       <h2 className="recorder-title">{headerText}</h2>
+
       <div ref={buttonWrapperRef} className="button-wrapper">
         <button
           onClick={handleRecordClick}
@@ -155,12 +206,11 @@ const AudioRecorder = ({ backendUrl }) => {
           disabled={isRecording}
         />
       </div>
+
       {result && (
         <div className="result">
-          {result.status === "Match found" && result.result ? (
-            <p>
-              Recognized Song: {result.result.song} by {result.result.artist}
-            </p>
+          {result.song ? (
+            <p>Recognized Song: {result.song} by {result.artist}</p>
           ) : result.error ? (
             <p>Error: {result.error}</p>
           ) : (
