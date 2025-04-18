@@ -192,8 +192,9 @@ const AudioRecorder = ({ backendUrl }) => {
           <button
             className={theme === 'auto' ? 'active' : ''}
             onClick={() => setTheme('auto')}
+            title="Auto mode"
           >
-            Auto
+            <img src={`${process.env.PUBLIC_URL}/buttons/dark-light_mode.png`} alt="" />
           </button>
         </div>
       </div>
