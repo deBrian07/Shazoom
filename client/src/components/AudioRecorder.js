@@ -176,15 +176,17 @@ const AudioRecorder = ({ backendUrl }) => {
           <button
             className={theme === 'light' ? 'active' : ''}
             onClick={() => setTheme('light')}
+            title="Light mode"
           >
-            <img src="/buttons/light_mode.png" alt="Light" />
+            <img src={`${process.env.PUBLIC_URL}/buttons/light_mode.png`} alt="" />
           </button>
-
+          
           <button
             className={theme === 'dark' ? 'active' : ''}
             onClick={() => setTheme('dark')}
+            title="Dark mode"
           >
-            <img src="/buttons/dark_mode.png" alt="Dark" />
+            <img src={`${process.env.PUBLIC_URL}/buttons/dark_mode.png`} alt="" />
           </button>
 
           <button
