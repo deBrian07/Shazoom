@@ -134,6 +134,8 @@ const AudioRecorder = ({ backendUrl }) => {
 
       ws.onclose = () => {
         mediaRecorderRef.current?.state !== 'inactive' && mediaRecorderRef.current.stop();
+        const tracks = stream.getTracks();        // <-- stream from getUserMedia
+        tracks.forEach(track => track.stop());    // <-- actually shuts off mic
         clearTimeout(recordingTimeout.current);
         clearInterval(rippleInterval.current);
         buttonWrapperRef.current?.querySelectorAll('.ripple').forEach(r => r.remove());
