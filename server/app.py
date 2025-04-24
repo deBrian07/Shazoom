@@ -55,7 +55,7 @@ async def stream():
       - Do not try matching until at least 5 seconds have elapsed.
       - Every second thereafter, process the currently accumulated audio,
         generate fingerprints, query the DB, and compute votes.
-      - If the raw vote count is at least 35, immediately send the match result.
+      - If the raw vote count is at least 40, immediately send the match result.
       - If no valid match is found by the end, send "No match found."
     """
     audio_buffer = BytesIO()
@@ -75,7 +75,6 @@ async def stream():
         try:
             chunk = await asyncio.wait_for(websocket.receive(), timeout=remaining)
         except asyncio.TimeoutError:
-            # No new audio, stop recording.
             break
         
         if isinstance(chunk, str) and chunk.lower() == "end":
@@ -99,20 +98,23 @@ async def stream():
                 last_match_time = time.time()
                 continue
             
+            # group query hashes
             query_hashes = defaultdict(list)
             for h, q_offset in query_fps:
                 query_hashes[h].append(q_offset)
             hash_list = list(query_hashes.keys())
             
-            batch_size = 8
-            hash_batches = [hash_list[i:i+batch_size] for i in range(0, len(hash_list), batch_size)]
-            batch_results = await asyncio.gather(*(find_fingerprint_batch(batch) for batch in hash_batches))
-            db_docs = list(chain.from_iterable(batch_results))
+            # ONE BIG DB QUERY
+            db_docs = await fingerprints_col.find(
+                {"hash": {"$in": hash_list}},
+                {"hash": 1, "song_id": 1, "offset": 1}
+            ).to_list(None)
             db_group = defaultdict(list)
             for doc in db_docs:
                 h = doc["hash"]
                 db_group[h].append((doc["song_id"], doc["offset"]))
             
+            # tally votes
             bin_width = 0.2  # seconds
             global_votes = defaultdict(int)
             for h, query_offsets in query_hashes.items():
