@@ -33,10 +33,28 @@ else:
 songs_col = db["songs"]
 fingerprints_col = db["fingerprints"]
 
-db_cache = {}# Ensure the hash index exists.
+db_cache = {}
+# Ensure the hash index exists and schedule cache prewarm
 @app.before_serving
 async def ensure_index():
     await fingerprints_col.create_index("hash")
+    asyncio.get_event_loop().create_task(_prewarm_hot_hashes())
+
+async def _prewarm_hot_hashes():
+    # identify most frequent hashes
+    TO_PREWARM = 10000
+    pipeline = [
+        {"$group": {"_id": "$hash", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": TO_PREWARM}
+    ]
+    cursor = fingerprints_col.aggregate(pipeline)
+    hot_hashes = [doc["_id"] async for doc in cursor]
+    # fetch in batches to warm the cache
+    BATCH_SIZE = 1000
+    for i in range(0, len(hot_hashes), BATCH_SIZE):
+        batch = hot_hashes[i:i+BATCH_SIZE]
+        await find_fingerprint_batch(batch)
 
 async def find_fingerprint_batch(batch):
     key = tuple(batch)
@@ -108,7 +126,6 @@ async def stream():
             for h, q_offset in query_fps:
                 query_hashes[h].append(q_offset)
             hash_list = list(query_hashes.keys())
-            # start timing processing from query to result
             processing_start = time.time()
             
             # ONE BIG DB QUERY
@@ -121,8 +138,8 @@ async def stream():
                 h = doc["hash"]
                 db_group[h].append((doc["song_id"], doc["offset"]))
             
-            # tally votes using Counter for speed
-            bin_width = 0.2  # seconds
+            # tally votes using Counter
+            bin_width = 0.2
             global_votes = Counter()
             for h, query_offsets in query_hashes.items():
                 if h not in db_group:
@@ -130,8 +147,7 @@ async def stream():
                 q_arr = np.array(query_offsets, dtype=np.float64)
                 for song_id, db_offset in db_group[h]:
                     votes_for_hash = accumulate_votes_for_hash(q_arr, db_offset, bin_width)
-                    # merge votes via Counter.update
-                    tmp = { (song_id, delta): cnt for delta, cnt in votes_for_hash.items() }
+                    tmp = {(song_id, delta): cnt for delta, cnt in votes_for_hash.items()}
                     global_votes.update(tmp)
             
             if global_votes:
@@ -147,7 +163,6 @@ async def stream():
                             "raw_votes": best_votes
                         }
                         await websocket.send(json.dumps({"status": "Match found", "result": match_result}))
-                        # log processing duration
                         processing_end = time.time()
                         print(f"Processing time: {processing_end - processing_start:.2f} seconds")
                         break
@@ -159,5 +174,4 @@ async def stream():
     await websocket.close(1000)
 
 if __name__ == "__main__":
-    # uvicorn app:app --host 0.0.0.0 --port 5000
     app.run(host="0.0.0.0", port=5000, debug=False)
