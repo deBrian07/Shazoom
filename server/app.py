@@ -33,13 +33,12 @@ else:
 songs_col = db["songs"]
 fingerprints_col = db["fingerprints"]
 
-# Ensure the hash index exists.
+db_cache = {}# Ensure the hash index exists.
 @app.before_serving
 async def ensure_index():
     await fingerprints_col.create_index("hash")
 
 async def find_fingerprint_batch(batch):
-    # cache repeated batch lookups in-process
     key = tuple(batch)
     if key in db_cache:
         return db_cache[key]
@@ -122,20 +121,21 @@ async def stream():
                 h = doc["hash"]
                 db_group[h].append((doc["song_id"], doc["offset"]))
             
-            # tally votes
+            # tally votes using Counter for speed
             bin_width = 0.2  # seconds
-            global_votes = defaultdict(int)
+            global_votes = Counter()
             for h, query_offsets in query_hashes.items():
                 if h not in db_group:
                     continue
-                query_offsets_array = np.array(query_offsets, dtype=np.float64)
+                q_arr = np.array(query_offsets, dtype=np.float64)
                 for song_id, db_offset in db_group[h]:
-                    votes_for_hash = accumulate_votes_for_hash(query_offsets_array, db_offset, bin_width)
-                    merge_votes(global_votes, votes_for_hash, song_id)
+                    votes_for_hash = accumulate_votes_for_hash(q_arr, db_offset, bin_width)
+                    # merge votes via Counter.update
+                    tmp = { (song_id, delta): cnt for delta, cnt in votes_for_hash.items() }
+                    global_votes.update(tmp)
             
             if global_votes:
-                vote_counts = Counter(global_votes)
-                best_match, best_votes = vote_counts.most_common(1)[0]
+                best_match, best_votes = global_votes.most_common(1)[0]
                 if best_votes >= min_votes:
                     best_song_id, best_delta = best_match
                     song = await songs_col.find_one({"_id": best_song_id})
