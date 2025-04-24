@@ -39,11 +39,17 @@ async def ensure_index():
     await fingerprints_col.create_index("hash")
 
 async def find_fingerprint_batch(batch):
+    # cache repeated batch lookups in-process
+    key = tuple(batch)
+    if key in db_cache:
+        return db_cache[key]
     cursor = fingerprints_col.find(
         {"hash": {"$in": batch}},
         {"hash": 1, "song_id": 1, "offset": 1}
     ).batch_size(1000)
-    return await cursor.to_list(length=None)
+    res = await cursor.to_list(length=None)
+    db_cache[key] = res
+    return res
 
 @app.websocket('/stream')
 async def stream():
