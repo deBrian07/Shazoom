@@ -42,7 +42,7 @@ async def ensure_index():
 
 async def _prewarm_hot_hashes():
     # identify most frequent hashes
-    TO_PREWARM = 10000
+    TO_PREWARM = 5000
     pipeline = [
         {"$group": {"_id": "$hash", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
@@ -51,7 +51,7 @@ async def _prewarm_hot_hashes():
     cursor = fingerprints_col.aggregate(pipeline)
     hot_hashes = [doc["_id"] async for doc in cursor]
     # fetch in batches to warm the cache
-    BATCH_SIZE = 1000
+    BATCH_SIZE = 500
     for i in range(0, len(hot_hashes), BATCH_SIZE):
         batch = hot_hashes[i:i+BATCH_SIZE]
         await find_fingerprint_batch(batch)
