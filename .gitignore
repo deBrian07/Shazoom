@@ -1,3 +1,5 @@
 /server/download/downloads
 /server/venv
 /server/database/__pycache__
+/server/__pycache__
+/client/dist
