@@ -69,7 +69,7 @@ async def stream():
     match_result = None
     max_recording = 9.0  
     threshold_time = 4.0 
-    min_votes = 40      
+    min_votes = 30      
     
     await websocket.send(json.dumps({"status": "Recording started"}))
     
