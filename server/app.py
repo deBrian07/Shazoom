@@ -103,6 +103,8 @@ async def stream():
             for h, q_offset in query_fps:
                 query_hashes[h].append(q_offset)
             hash_list = list(query_hashes.keys())
+            # start timing processing from query to result
+            processing_start = time.time()
             
             # ONE BIG DB QUERY
             db_docs = await fingerprints_col.find(
@@ -139,6 +141,9 @@ async def stream():
                             "raw_votes": best_votes
                         }
                         await websocket.send(json.dumps({"status": "Match found", "result": match_result}))
+                        # log processing duration
+                        processing_end = time.time()
+                        print(f"Processing time: {processing_end - processing_start:.2f} seconds")
                         break
             last_match_time = time.time()
     
