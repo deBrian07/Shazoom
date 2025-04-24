@@ -143,7 +143,7 @@ async def stream():
     if not match_result:
         await websocket.send(json.dumps({"status": "No match found after recording"}))
     await websocket.send(json.dumps({"status": "Finished"}))
-    await websocket.close()
+    await websocket.close(1000)
 
 if __name__ == "__main__":
     # uvicorn app:app --host 0.0.0.0 --port 5000
