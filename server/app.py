@@ -33,17 +33,22 @@ else:
 songs_col = db["songs"]
 fingerprints_col = db["fingerprints"]
 
-# Ensure the hash index exists.
+db_cache = {}# Ensure the hash index exists.
 @app.before_serving
 async def ensure_index():
     await fingerprints_col.create_index("hash")
 
 async def find_fingerprint_batch(batch):
+    key = tuple(batch)
+    if key in db_cache:
+        return db_cache[key]
     cursor = fingerprints_col.find(
         {"hash": {"$in": batch}},
         {"hash": 1, "song_id": 1, "offset": 1}
     ).batch_size(1000)
-    return await cursor.to_list(length=None)
+    res = await cursor.to_list(length=None)
+    db_cache[key] = res
+    return res
 
 @app.websocket('/stream')
 async def stream():
@@ -55,7 +60,7 @@ async def stream():
       - Do not try matching until at least 5 seconds have elapsed.
       - Every second thereafter, process the currently accumulated audio,
         generate fingerprints, query the DB, and compute votes.
-      - If the raw vote count is at least 35, immediately send the match result.
+      - If the raw vote count is at least 40, immediately send the match result.
       - If no valid match is found by the end, send "No match found."
     """
     audio_buffer = BytesIO()
@@ -75,7 +80,6 @@ async def stream():
         try:
             chunk = await asyncio.wait_for(websocket.receive(), timeout=remaining)
         except asyncio.TimeoutError:
-            # No new audio, stop recording.
             break
         
         if isinstance(chunk, str) and chunk.lower() == "end":
@@ -99,33 +103,39 @@ async def stream():
                 last_match_time = time.time()
                 continue
             
+            # group query hashes
             query_hashes = defaultdict(list)
             for h, q_offset in query_fps:
                 query_hashes[h].append(q_offset)
             hash_list = list(query_hashes.keys())
+            # start timing processing from query to result
+            processing_start = time.time()
             
-            batch_size = 8
-            hash_batches = [hash_list[i:i+batch_size] for i in range(0, len(hash_list), batch_size)]
-            batch_results = await asyncio.gather(*(find_fingerprint_batch(batch) for batch in hash_batches))
-            db_docs = list(chain.from_iterable(batch_results))
+            # ONE BIG DB QUERY
+            db_docs = await fingerprints_col.find(
+                {"hash": {"$in": hash_list}},
+                {"hash": 1, "song_id": 1, "offset": 1}
+            ).to_list(None)
             db_group = defaultdict(list)
             for doc in db_docs:
                 h = doc["hash"]
                 db_group[h].append((doc["song_id"], doc["offset"]))
             
+            # tally votes using Counter for speed
             bin_width = 0.2  # seconds
-            global_votes = defaultdict(int)
+            global_votes = Counter()
             for h, query_offsets in query_hashes.items():
                 if h not in db_group:
                     continue
-                query_offsets_array = np.array(query_offsets, dtype=np.float64)
+                q_arr = np.array(query_offsets, dtype=np.float64)
                 for song_id, db_offset in db_group[h]:
-                    votes_for_hash = accumulate_votes_for_hash(query_offsets_array, db_offset, bin_width)
-                    merge_votes(global_votes, votes_for_hash, song_id)
+                    votes_for_hash = accumulate_votes_for_hash(q_arr, db_offset, bin_width)
+                    # merge votes via Counter.update
+                    tmp = { (song_id, delta): cnt for delta, cnt in votes_for_hash.items() }
+                    global_votes.update(tmp)
             
             if global_votes:
-                vote_counts = Counter(global_votes)
-                best_match, best_votes = vote_counts.most_common(1)[0]
+                best_match, best_votes = global_votes.most_common(1)[0]
                 if best_votes >= min_votes:
                     best_song_id, best_delta = best_match
                     song = await songs_col.find_one({"_id": best_song_id})
@@ -137,13 +147,16 @@ async def stream():
                             "raw_votes": best_votes
                         }
                         await websocket.send(json.dumps({"status": "Match found", "result": match_result}))
+                        # log processing duration
+                        processing_end = time.time()
+                        print(f"Processing time: {processing_end - processing_start:.2f} seconds")
                         break
             last_match_time = time.time()
     
     if not match_result:
         await websocket.send(json.dumps({"status": "No match found after recording"}))
     await websocket.send(json.dumps({"status": "Finished"}))
-    await websocket.close()
+    await websocket.close(1000)
 
 if __name__ == "__main__":
     # uvicorn app:app --host 0.0.0.0 --port 5000
