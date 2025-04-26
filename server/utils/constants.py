@@ -11,9 +11,9 @@ FINGERPRINT_CONFIGS = [
     (4096, 1024, "high_freq"),
     (1024, 256,  "high_time"),
 ]
-THRESHOLD_MULTIPLIER = 4.0  # adaptive peak threshold multiplier
+THRESHOLD_MULTIPLIER = 3.5  # adaptive peak threshold multiplier
 FILTER_COEF = 0.7          # global amplitude filter coefficient
-FANOUT = 7                 # number of target pairings per anchor
+FANOUT = 10                 # number of target pairings per anchor
 WINDOW_SECS = 5.0          # max pairing time gap in seconds
 
 # Matching and recording thresholds

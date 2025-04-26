@@ -1,4 +1,8 @@
 from pymongo import MongoClient
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(__file__, "..", "..")))
+
 from utils.constants import DEV_MODE
 
 # Connect to your MongoDB instance.
