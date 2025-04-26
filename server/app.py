@@ -141,15 +141,21 @@ async def stream():
             hash_list = list(query_hashes.keys())
             processing_start = time.time()
             
-            # ONE BIG DB QUERY
-            db_docs = await fingerprints_col.find(
-                {"hash": {"$in": hash_list}},
-                {"hash": 1, "song_id": 1, "offset": 1}
-            ).to_list(None)
-            db_group = defaultdict(list)
-            for doc in db_docs:
-                h = doc["hash"]
-                db_group[h].append((doc["song_id"], doc["offset"]))
+            # figure out which hashes we haven't seen before
+            to_fetch = [h for h in hash_list if h not in db_cache]
+
+            # pull unknown hashes from Mongo once
+            if to_fetch:
+                cursor = fingerprints_col.find(
+                    {"hash": {"$in": to_fetch}},
+                    {"hash": 1, "song_id": 1, "offset": 1}
+                )
+                fresh_docs = await cursor.to_list(length=None)
+                for doc in fresh_docs:
+                    db_cache.setdefault(doc["hash"], []).append((doc["song_id"], doc["offset"]))
+
+            # per-hash grouping entirely from the in-memory cache
+            db_group = {h: db_cache.get(h, []) for h in hash_list}
             
             # compute IDF weights
             total_songs = await songs_col.count_documents({})
