@@ -1,6 +1,7 @@
 import os
 import csv
 import numpy as np
+import math
 from quart import Quart, request, jsonify, websocket
 from quart_cors import cors
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -22,7 +23,7 @@ import psutil
 import gc
 import sys
 
-from utils.constants import (ALLOWED_ORIGINS, BATCH_SIZE, DEV_MODE, MAX_RECORDING, MIN_VOTES, MONGO_URI, RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM)
+from utils.constants import (ALLOWED_ORIGINS, BATCH_SIZE, BIN_WIDTH, DEV_MODE, MAX_RECORDING, MIN_VOTES, MONGO_URI, RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM)
 
 app = Quart(__name__)
 app = cors(app, allow_origin=ALLOWED_ORIGINS)
@@ -150,18 +151,25 @@ async def stream():
                 h = doc["hash"]
                 db_group[h].append((doc["song_id"], doc["offset"]))
             
-            # tally votes using Counter
-            bin_width = 0.2
+            # compute IDF weights
+            total_songs = await songs_col.count_documents({})
+            idf_weights = {
+                h: math.log(total_songs / (len({sid for sid, _ in db_group[h]}) + 1))
+                for h in db_group
+            }
+
+            # tally weighted votes
             global_votes = Counter()
             for h, query_offsets in query_hashes.items():
                 if h not in db_group:
                     continue
+                w = idf_weights.get(h, 1.0)
                 q_arr = np.array(query_offsets, dtype=np.float64)
                 for song_id, db_offset in db_group[h]:
-                    votes_for_hash = accumulate_votes_for_hash(q_arr, db_offset, bin_width)
-                    tmp = {(song_id, delta): cnt for delta, cnt in votes_for_hash.items()}
-                    global_votes.update(tmp)
-            
+                    votes_for_hash = accumulate_votes_for_hash(q_arr, db_offset, BIN_WIDTH)
+                    for delta, cnt in votes_for_hash.items():
+                        global_votes[(song_id, delta)] += cnt * w
+
             if global_votes:
                 best_match, best_votes = global_votes.most_common(1)[0]
                 if best_votes >= MIN_VOTES:
