@@ -4,7 +4,7 @@ import numpy as np
 from pymongo import MongoClient
 from tqdm import tqdm
 import concurrent.futures
-from server.utils.constants import MONGO_URI
+from utils.constants import DEV_MODE, MONGO_URI
 from utils.utils import audio_file_to_samples, generate_fingerprints_multiresolution
 
 def process_song(song, songs_col, fingerprints_col):
@@ -36,7 +36,6 @@ def main():
     # Connect to MongoDB.
     client = MongoClient(MONGO_URI)
 
-    DEV_MODE = False  # True when testing something (change to False before commiting)
     if DEV_MODE:
         db = client["musicDB_dev"]
     else:

@@ -2,6 +2,9 @@
 MONGO_URI = "mongodb://localhost:27017"
 ALLOWED_ORIGINS = ["http://localhost:3000", "https://debrian07.github.io"]
 
+
+DEV_MODE = True  # True when testing something (change to False before commiting)
+
 # Fingerprint extraction parameters
 # Each tuple: (window_size, hop_size, version_label)
 FINGERPRINT_CONFIGS = [

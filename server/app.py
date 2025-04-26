@@ -22,14 +22,13 @@ import psutil
 import gc
 import sys
 
-from utils.constants import (ALLOWED_ORIGINS, BATCH_SIZE, MAX_RECORDING, MIN_VOTES, MONGO_URI, RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM)
+from utils.constants import (ALLOWED_ORIGINS, BATCH_SIZE, DEV_MODE, MAX_RECORDING, MIN_VOTES, MONGO_URI, RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM)
 
 app = Quart(__name__)
 app = cors(app, allow_origin=ALLOWED_ORIGINS)
 
 # MongoDB connection
 client = AsyncIOMotorClient(MONGO_URI)
-DEV_MODE = False
 if DEV_MODE:
     db = client["musicDB_dev"]
 else:
