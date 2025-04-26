@@ -2,4 +2,5 @@
 /server/venv
 /server/database/__pycache__
 /server/__pycache__
+/client/dist
 /server/utils/__pycache__

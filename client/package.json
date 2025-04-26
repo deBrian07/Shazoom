@@ -1,8 +1,21 @@
 {
   "name": "Shazoom",
-  "homepage": "https://debrian07.github.io/Shazoom",
   "version": "0.1.0",
+  "description": "Music recognition app built with React and Electron",
+  "author": "Brian Chen",
+  "homepage": "https://debrian07.github.io/Shazoom",
+  "main": "electron.js",
   "private": true,
+  "scripts": {
+    "start": "react-scripts start",
+    "electron:dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && electron .\"",
+    "build": "react-scripts build",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "dist": "npm run build && electron-builder"
+  },
   "dependencies": {
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
@@ -14,13 +27,42 @@
     "react-scripts": "5.0.1",
     "web-vitals": "^2.1.4"
   },
-  "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
+  "devDependencies": {
+    "concurrently": "^7.6.0",
+    "electron": "^35.2.1",
+    "electron-builder": "^26.0.12",
+    "wait-on": "^7.0.1"
+  },
+  "build": {
+    "appId": "com.debrian.shazoom",
+    "productName": "Shazoom",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "build/**/*",
+      "electron/**/*"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.music"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Audio"
+    }
   },
   "eslintConfig": {
     "extends": [
@@ -39,8 +81,5 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  },
-  "devDependencies": {
-    "gh-pages": "^6.3.0"
   }
 }

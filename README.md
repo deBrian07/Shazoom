@@ -29,6 +29,14 @@ npm start
 npm run build
 npm run deploy
 ```
+### Build/ship Frontend
+```
+npm run electron:serve
+npm run electron:prod
+
+# build native installers
+npm run dist
+```
 
 ### Download songs
 Make sure that all the songs are in `songs.csv` in the order of `song name, artist`
