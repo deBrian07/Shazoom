@@ -5,6 +5,7 @@ from pydub import AudioSegment
 
 from numba import njit, types
 from numba.typed import Dict as TypedDict
+from utils.constants import FANOUT, FILTER_COEF, FINGERPRINT_CONFIGS, THRESHOLD_MULTIPLIER, WINDOW_SECS
 
 def low_pass_filter(samples, cutoff, sample_rate):
     """Applies a first‐order low‐pass filter with cutoff frequency (Hz)."""
@@ -133,18 +134,15 @@ def generate_fingerprints(samples, sample_rate,
     return fingerprints
 
 def generate_fingerprints_multiresolution(samples, sample_rate):
-    configs = [
-        (4096, 1024, "high_freq"),
-        (1024, 256, "high_time")
-    ]
+    configs = FINGERPRINT_CONFIGS
     all_fps = []
     for window_size, hop_size, version in configs:
         fps = generate_fingerprints(
             samples, sample_rate,
-            threshold_multiplier=4,  # Tune 
-            filter_coef=0.7,         # Tune 
-            fanout=7,                # Tune: smaller fanout yields fewer pairings
-            window_secs=5.0,
+            threshold_multiplier=THRESHOLD_MULTIPLIER,  # Tune 
+            filter_coef=FILTER_COEF,         # Tune 
+            fanout=FANOUT,                # Tune: smaller fanout yields fewer pairings
+            window_secs=WINDOW_SECS,
             window_size=window_size,
             hop_size=hop_size,
             band_boundaries=None  

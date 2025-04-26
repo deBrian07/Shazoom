@@ -5,7 +5,7 @@ from quart import Quart, request, jsonify, websocket
 from quart_cors import cors
 from motor.motor_asyncio import AsyncIOMotorClient
 from collections import defaultdict, Counter
-from database.utils import (
+from utils.utils import (
     audio_file_to_samples,
     generate_fingerprints_multiresolution,
     accumulate_votes_for_hash,
@@ -22,12 +22,12 @@ import psutil
 import gc
 import sys
 
+from utils.constants import (ALLOWED_ORIGINS, BATCH_SIZE, MAX_RECORDING, MIN_VOTES, MONGO_URI, RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM)
+
 app = Quart(__name__)
-allowed_origins = ["http://localhost:3000", "https://debrian07.github.io"]
-app = cors(app, allow_origin=allowed_origins)
+app = cors(app, allow_origin=ALLOWED_ORIGINS)
 
 # MongoDB connection
-MONGO_URI = "mongodb://localhost:27017"
 client = AsyncIOMotorClient(MONGO_URI)
 DEV_MODE = False
 if DEV_MODE:
@@ -66,7 +66,6 @@ async def ensure_index():
 
 async def _prewarm_hot_hashes():
     # identify most frequent hashes (for OS cache warm-up only)
-    TO_PREWARM = 5000  # reduce if memory is tight
     pipeline = [
         {"$group": {"_id": "$hash", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
@@ -76,7 +75,6 @@ async def _prewarm_hot_hashes():
     hot_hashes = [doc["_id"] async for doc in cursor]
 
     # warm index and data in OS cache in small projected batches
-    BATCH_SIZE = 500
     for i in range(0, len(hot_hashes), BATCH_SIZE):
         batch = hot_hashes[i:i+BATCH_SIZE]
         # fetch keys only (no offsets/song_ids) to touch pages
@@ -103,14 +101,11 @@ async def stream():
     start_time = time.time()
     last_match_time = time.time()
     match_result = None
-    max_recording = 9.0  
-    threshold_time = 4.0 
-    min_votes = 30      
     
     await websocket.send(json.dumps({"status": "Recording started"}))
     
     while True:
-        remaining = max_recording - (time.time() - start_time)
+        remaining = MAX_RECORDING - (time.time() - start_time)
         if remaining <= 0:
             break
         try:
@@ -124,7 +119,7 @@ async def stream():
         elapsed = time.time() - start_time
         await websocket.send(json.dumps({"status": "Recording", "elapsed": elapsed}))
         
-        if elapsed > threshold_time and (time.time() - last_match_time) >= 1:
+        if elapsed > THRESHOLD_TIME and (time.time() - last_match_time) >= 1:
             data = audio_buffer.getvalue()
             buf = BytesIO(data)
             try:
@@ -170,7 +165,7 @@ async def stream():
             
             if global_votes:
                 best_match, best_votes = global_votes.most_common(1)[0]
-                if best_votes >= min_votes:
+                if best_votes >= MIN_VOTES:
                     best_song_id, best_delta = best_match
                     song = await songs_col.find_one({"_id": best_song_id})
                     if song:
@@ -193,10 +188,9 @@ async def stream():
 
 async def _monitor_ram():
     # Clear cache if RAM usage exceeds 58 GB
-    THRESHOLD = 58 * 1024 ** 3
     while True:
         mem = psutil.virtual_memory()
-        if mem.used > THRESHOLD:
+        if mem.used > RAM_THRESHOLD_BYTES:
             print(f"RAM usage {mem.used/(1024**3):.1f}GB > 58GB, clearing cache")
             db_cache.clear()
             gc.collect()
@@ -205,9 +199,8 @@ async def _monitor_ram():
         await asyncio.sleep(60)
 
 async def _monitor_ram():
-    THRESHOLD = 58 * 1024 ** 3  # 58GB in bytes
     while True:
-        if psutil.virtual_memory().used > THRESHOLD:
+        if psutil.virtual_memory().used > RAM_THRESHOLD_BYTES:
             print(f"RAM usage {psutil.virtual_memory().used/(1024**3):.1f}GB > 58GB, restarting")
             os.execv(sys.executable, [sys.executable] + sys.argv)
         await asyncio.sleep(60)
