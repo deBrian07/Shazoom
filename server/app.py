@@ -14,6 +14,9 @@ from utils.utils import (
 )
 import time
 import asyncio
+import uvloop
+# Use uvloop for a faster asyncio event loop
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 from itertools import chain
 from io import BytesIO
 import json
@@ -158,9 +161,13 @@ async def stream():
             # ---- cached DB lookup for new hashes ----
             with timer("db_find"):
                 to_fetch = [h for h in hash_list if h not in db_cache]
-                if to_fetch:
+                # split into batches to avoid huge $in lists
+                for i in range(0, len(to_fetch), BATCH_SIZE):
+                    batch = to_fetch[i:i+BATCH_SIZE]
+                    if not batch:
+                        continue
                     cursor = fingerprints_col.find(
-                        {"hash": {"$in": to_fetch}},
+                        {"hash": {"$in": batch}},
                         {"hash": 1, "song_id": 1, "offset": 1}
                     )
                     fresh_docs = await cursor.to_list(length=None)
