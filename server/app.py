@@ -19,11 +19,22 @@ from io import BytesIO
 import json
 import psutil
 import sys
-import psutil
 import gc
-import sys
+from contextlib import contextmanager
 
-from utils.constants import (ALLOWED_ORIGINS, BATCH_SIZE, BIN_WIDTH, DEV_MODE, MAX_RECORDING, MIN_VOTES, MONGO_URI, RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM)
+from utils.constants import (
+    ALLOWED_ORIGINS, BATCH_SIZE, BIN_WIDTH, DEV_MODE,
+    MAX_RECORDING, MIN_VOTES, MONGO_URI,
+    RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM
+)
+
+# --- Timing helper ---
+@contextmanager
+def timer(name: str):
+    t0 = time.time()
+    yield
+    t1 = time.time()
+    print(f"[{name}] {t1 - t0:.3f}s")
 
 app = Quart(__name__)
 app = cors(app, allow_origin=ALLOWED_ORIGINS)
@@ -83,7 +94,6 @@ async def _prewarm_hot_hashes():
             {"hash": 1}
         ).batch_size(100).to_list(length=1)
 
-
 @app.websocket('/stream')
 async def stream():
     """
@@ -128,7 +138,12 @@ async def stream():
                 await websocket.send(json.dumps({"error": str(e)}))
                 continue
             
-            query_fps = generate_fingerprints_multiresolution(samples, sample_rate)
+            # track processing start
+            processing_start = time.time()
+
+            # ---- fingerprint generation ----
+            with timer("generate_fps"):
+                query_fps = generate_fingerprints_multiresolution(samples, sample_rate)
             if not query_fps:
                 await websocket.send(json.dumps({"status": "No fingerprints yet."}))
                 last_match_time = time.time()
@@ -139,42 +154,43 @@ async def stream():
             for h, q_offset in query_fps:
                 query_hashes[h].append(q_offset)
             hash_list = list(query_hashes.keys())
-            processing_start = time.time()
+
+            # ---- cached DB lookup for new hashes ----
+            with timer("db_find"):
+                to_fetch = [h for h in hash_list if h not in db_cache]
+                if to_fetch:
+                    cursor = fingerprints_col.find(
+                        {"hash": {"$in": to_fetch}},
+                        {"hash": 1, "song_id": 1, "offset": 1}
+                    )
+                    fresh_docs = await cursor.to_list(length=None)
+                    for doc in fresh_docs:
+                        db_cache.setdefault(doc["hash"], []).append((doc["song_id"], doc["offset"]))
+
+            # ---- in-memory grouping ----
+            with timer("build_db_group"):
+                db_group = {h: db_cache.get(h, []) for h in hash_list}
             
-            # figure out which hashes we haven't seen before
-            to_fetch = [h for h in hash_list if h not in db_cache]
+            # ---- IDF weight computation ----
+            with timer("compute_idf"):
+                total_songs = await songs_col.count_documents({})
+                idf_weights = {
+                    h: math.log(total_songs / (len({sid for sid, _ in db_group[h]}) + 1))
+                    for h in db_group
+                }
 
-            # pull unknown hashes from Mongo once
-            if to_fetch:
-                cursor = fingerprints_col.find(
-                    {"hash": {"$in": to_fetch}},
-                    {"hash": 1, "song_id": 1, "offset": 1}
-                )
-                fresh_docs = await cursor.to_list(length=None)
-                for doc in fresh_docs:
-                    db_cache.setdefault(doc["hash"], []).append((doc["song_id"], doc["offset"]))
-
-            # per-hash grouping entirely from the in-memory cache
-            db_group = {h: db_cache.get(h, []) for h in hash_list}
-            
-            # compute IDF weights
-            total_songs = await songs_col.count_documents({})
-            idf_weights = {
-                h: math.log(total_songs / (len({sid for sid, _ in db_group[h]}) + 1))
-                for h in db_group
-            }
-
-            # tally weighted votes
-            global_votes = Counter()
-            for h, query_offsets in query_hashes.items():
-                if h not in db_group:
-                    continue
-                w = idf_weights.get(h, 1.0)
-                q_arr = np.array(query_offsets, dtype=np.float64)
-                for song_id, db_offset in db_group[h]:
-                    votes_for_hash = accumulate_votes_for_hash(q_arr, db_offset, BIN_WIDTH)
-                    for delta, cnt in votes_for_hash.items():
-                        global_votes[(song_id, delta)] += cnt * w
+            # ---- vote tallying ----
+            with timer("vote_tally"):
+                global_votes = Counter()
+                for h, query_offsets in query_hashes.items():
+                    if h not in db_group:
+                        continue
+                    w = idf_weights.get(h, 1.0)
+                    q_arr = np.array(query_offsets, dtype=np.float64)
+                    for song_id, db_offset in db_group[h]:
+                        votes_for_hash = accumulate_votes_for_hash(q_arr, db_offset, BIN_WIDTH)
+                        for delta, cnt in votes_for_hash.items():
+                            global_votes[(song_id, delta)] += cnt * w
 
             if global_votes:
                 best_match, best_votes = global_votes.most_common(1)[0]
