@@ -69,14 +69,17 @@ async def find_fingerprint_batch(batch):
 # Ensure the hash index exists and schedule RAM monitor and cache prewarm
 @app.before_serving
 async def ensure_index():
-    await fingerprints_col.create_index("hash")
-    asyncio.get_event_loop().create_task(_prewarm_hot_hashes())
-    # schedule RAM monitor
-    asyncio.get_event_loop().create_task(_monitor_ram())
-    # schedule RAM monitor and prewarm tasks
-    loop = asyncio.get_event_loop()
-    loop.create_task(_monitor_ram())
-    loop.create_task(_prewarm_hot_hashes())
+    # schedule covered compound index creation in the background
+    asyncio.ensure_future(
+        fingerprints_col.create_index([
+            ("hash", 1),
+            ("song_id", 1),
+            ("offset", 1)
+        ])
+    )
+    # schedule cache prewarm and RAM monitor tasks
+    asyncio.create_task(_prewarm_hot_hashes())
+    asyncio.create_task(_monitor_ram())
 
 async def _prewarm_hot_hashes():
     # identify most frequent hashes (for OS cache warm-up only)
@@ -124,10 +127,9 @@ async def stream():
         try:
             chunk = await asyncio.wait_for(websocket.receive(), timeout=remaining)
         except asyncio.TimeoutError:
-            break
-        
-        if isinstance(chunk, str) and chunk.lower() == "end":
             break  
+        if isinstance(chunk, str) and chunk.lower() == "end":
+            break
         audio_buffer.write(chunk)
         elapsed = time.time() - start_time
         await websocket.send(json.dumps({"status": "Recording", "elapsed": elapsed}))
@@ -223,18 +225,17 @@ async def stream():
     await websocket.close(1000)
 
 async def _monitor_ram():
-    # Clear cache if RAM usage exceeds 58 GB
+    # Clear cache if RAM usage exceeds threshold
     while True:
         mem = psutil.virtual_memory()
         if mem.used > RAM_THRESHOLD_BYTES:
-            print(f"RAM usage {mem.used/(1024**3):.1f}GB > 58GB, clearing cache")
+            print(f"RAM usage {mem.used/(1024**3):.1f}GB > threshold, clearing cache")
             db_cache.clear()
             gc.collect()
-            # restart process to free memory
             os.execv(sys.executable, [sys.executable] + sys.argv)
         await asyncio.sleep(60)
 
-async def _monitor_ram():
+# (Removed duplicate _monitor_ram)():
     while True:
         if psutil.virtual_memory().used > RAM_THRESHOLD_BYTES:
             print(f"RAM usage {psutil.virtual_memory().used/(1024**3):.1f}GB > 58GB, restarting")
@@ -242,4 +243,5 @@ async def _monitor_ram():
         await asyncio.sleep(60)
 
 if __name__ == "__main__":
+    # For local development only; in production use an ASGI server
     app.run(host="0.0.0.0", port=5000, debug=False)
