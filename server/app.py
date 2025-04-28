@@ -241,5 +241,12 @@ async def _monitor_ram():
         await asyncio.sleep(60)
       
 if __name__ == "__main__":
-    # For local development only; in production use an ASGI server
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    # In production, use an ASGI server with multiple workers for concurrency
+    import uvicorn
+    uvicorn.run(
+        "app:app",  # use import string so workers are enabled
+        host="0.0.0.0",
+        port=5000,
+        log_level="info",
+        workers=5  # adjust this based on available CPU cores
+    )
