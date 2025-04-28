@@ -31,6 +31,9 @@ from utils.constants import (
     RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM
 )
 
+# number of worker processes (must match uvicorn --workers)
+WORKER_COUNT = 5
+
 # --- Timing helper ---
 @contextmanager
 def timer(name: str):
@@ -71,9 +74,6 @@ async def find_fingerprint_batch(batch):
 # Ensure the hash index exists and schedule RAM monitor and cache prewarm
 @app.before_serving
 async def ensure_index():
-    # print MongoDB connection stats
-    status = await db.command("serverStatus")
-    print(f"Mongo connections - current: {status['connections']['current']}, available: {status['connections']['available']}, totalCreated: {status['connections']['totalCreated']}")
     # schedule covered compound index creation in the background
     asyncio.ensure_future(
         fingerprints_col.create_index([
@@ -82,6 +82,13 @@ async def ensure_index():
             ("offset", 1)
         ])
     )
+    # tune WiredTiger cache to a fixed 20GB per worker
+    cache_gb = 45  # fixed cache size per worker in GB
+    await client.admin.command({
+        "setParameter": 1,
+        "wiredTigerEngineRuntimeConfig": f"cache_size={cache_gb}G"
+    })
+    print(f"WiredTiger cache size set to {cache_gb}G")
     # schedule cache prewarm and RAM monitor tasks
     asyncio.create_task(_prewarm_hot_hashes())
     asyncio.create_task(_monitor_ram())
