@@ -43,7 +43,9 @@ app = Quart(__name__)
 app = cors(app, allow_origin=ALLOWED_ORIGINS)
 
 # MongoDB connection
-client = AsyncIOMotorClient(MONGO_URI)
+client = AsyncIOMotorClient(MONGO_URI, maxPoolSize=200)  # increased pool size to 200
+# inspect MongoDB connection pool configuration
+print(f"Configured MongoDB max pool size: {client.max_pool_size}")
 if DEV_MODE:
     db = client["musicDB_dev"]
 else:
@@ -69,6 +71,9 @@ async def find_fingerprint_batch(batch):
 # Ensure the hash index exists and schedule RAM monitor and cache prewarm
 @app.before_serving
 async def ensure_index():
+    # print MongoDB connection stats
+    status = await db.command("serverStatus")
+    print(f"Mongo connections - current: {status['connections']['current']}, available: {status['connections']['available']}, totalCreated: {status['connections']['totalCreated']}")
     # schedule covered compound index creation in the background
     asyncio.ensure_future(
         fingerprints_col.create_index([
@@ -234,14 +239,7 @@ async def _monitor_ram():
             gc.collect()
             os.execv(sys.executable, [sys.executable] + sys.argv)
         await asyncio.sleep(60)
-
-# (Removed duplicate _monitor_ram)():
-    while True:
-        if psutil.virtual_memory().used > RAM_THRESHOLD_BYTES:
-            print(f"RAM usage {psutil.virtual_memory().used/(1024**3):.1f}GB > 58GB, restarting")
-            os.execv(sys.executable, [sys.executable] + sys.argv)
-        await asyncio.sleep(60)
-
+      
 if __name__ == "__main__":
     # For local development only; in production use an ASGI server
     app.run(host="0.0.0.0", port=5000, debug=False)
