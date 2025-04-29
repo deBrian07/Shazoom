@@ -27,3 +27,5 @@ RAM_THRESHOLD_BYTES = 58 * 1024 ** 3  # 58 GB, used in RAM-monitoring
 
 TO_PREWARM = 5000  # reduce if memory is tight
 BATCH_SIZE = 500
+
+WORKERS = 8

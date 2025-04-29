@@ -29,11 +29,9 @@ from contextlib import contextmanager
 from utils.constants import (
     ALLOWED_ORIGINS, BATCH_SIZE, BIN_WIDTH, DEV_MODE,
     MAX_RECORDING, MIN_VOTES, MONGO_URI,
-    RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM
+    RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM, WORKERS
 )
 
-# number of worker processes (must match uvicorn --workers)
-WORKER_COUNT = 5
 
 # --- Timing helper ---
 @contextmanager
@@ -173,19 +171,23 @@ async def stream():
                 query_hashes[h].append(q_offset)
             hash_list = list(query_hashes.keys())
 
-            # ---- cached DB lookup for new hashes ----
+            # ---- cached DB lookup for new hashes (parallelized) ----
             with timer("db_find"):
                 to_fetch = [h for h in hash_list if h not in db_cache]
                 # split into batches to avoid huge $in lists
-                for i in range(0, len(to_fetch), BATCH_SIZE):
-                    batch = to_fetch[i:i+BATCH_SIZE]
-                    if not batch:
-                        continue
-                    cursor = fingerprints_col.find(
-                        {"hash": {"$in": batch}},
-                        {"hash": 1, "song_id": 1, "offset": 1}
-                    )
-                    fresh_docs = await cursor.to_list(length=None)
+                batches = [to_fetch[i:i+BATCH_SIZE] for i in range(0, len(to_fetch), BATCH_SIZE) if to_fetch[i:i+BATCH_SIZE]]
+                # limit concurrency to 6 simultaneous queries
+                sem = asyncio.Semaphore(6)
+                async def fetch(batch):
+                    async with sem:
+                        return await fingerprints_col.find(
+                            {"hash": {"$in": batch}},
+                            {"hash": 1, "song_id": 1, "offset": 1}
+                        ).to_list(length=None)
+                # launch all batch fetches in parallel and merge as they complete
+                tasks = [asyncio.create_task(fetch(batch)) for batch in batches]
+                for coro in asyncio.as_completed(tasks):
+                    fresh_docs = await coro
                     for doc in fresh_docs:
                         db_cache.setdefault(doc["hash"], []).append((doc["song_id"], doc["offset"]))
 
@@ -265,5 +267,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=5000,
         log_level="info",
-        workers=5  # adjust this based on available CPU cores
+        workers=WORKERS  # use physical core count  # adjust this based on available CPU cores
     )
