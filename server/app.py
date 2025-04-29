@@ -201,19 +201,27 @@ async def stream():
                     for h in db_group
                 }
 
-            # ---- vote tallying (vectorized) ----
+            # ---- vote tallying (vectorized with early exit) ----
             with timer("vote_tally"):
                 global_votes = Counter()
+                early = False
+                early_match = None
                 for h, query_offsets in query_hashes.items():
                     docs = db_group.get(h)
                     if not docs:
                         continue
                     w = idf_weights.get(h, 1.0)
                     q_arr = np.array(query_offsets, dtype=np.float64)
-                    # fast accumulation (NumPy + fallback)
                     votes = accumulate_votes_vectorized(q_arr, docs, BIN_WIDTH)
                     for (song_id, delta), cnt in votes.items():
-                        global_votes[(song_id, delta)] += cnt * w
+                        key = (song_id, delta)
+                        global_votes[key] += cnt * w
+                        if global_votes[key] >= MIN_VOTES:
+                            early = True
+                            early_match = key
+                            break
+                    if early:
+                        break
 
             if global_votes:
                 best_match, best_votes = global_votes.most_common(1)[0]
