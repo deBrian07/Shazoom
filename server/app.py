@@ -7,6 +7,7 @@ from quart_cors import cors
 from motor.motor_asyncio import AsyncIOMotorClient
 from collections import defaultdict, Counter
 from utils.utils import (
+    accumulate_votes_vectorized,
     audio_file_to_samples,
     generate_fingerprints_multiresolution,
     accumulate_votes_for_hash,
@@ -200,18 +201,19 @@ async def stream():
                     for h in db_group
                 }
 
-            # ---- vote tallying ----
+            # ---- vote tallying (vectorized) ----
             with timer("vote_tally"):
                 global_votes = Counter()
                 for h, query_offsets in query_hashes.items():
-                    if h not in db_group:
+                    docs = db_group.get(h)
+                    if not docs:
                         continue
                     w = idf_weights.get(h, 1.0)
                     q_arr = np.array(query_offsets, dtype=np.float64)
-                    for song_id, db_offset in db_group[h]:
-                        votes_for_hash = accumulate_votes_for_hash(q_arr, db_offset, BIN_WIDTH)
-                        for delta, cnt in votes_for_hash.items():
-                            global_votes[(song_id, delta)] += cnt * w
+                    # fast accumulation (NumPy + fallback)
+                    votes = accumulate_votes_vectorized(q_arr, docs, BIN_WIDTH)
+                    for (song_id, delta), cnt in votes.items():
+                        global_votes[(song_id, delta)] += cnt * w
 
             if global_votes:
                 best_match, best_votes = global_votes.most_common(1)[0]
