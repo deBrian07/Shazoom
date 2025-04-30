@@ -1,41 +1,33 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './AudioRecorder.css';
+import SettingsDrawer from './SettingsDrawer';
+import RecorderButton from './RecorderButton';
+import ResultDisplay from './ResultDisplay';
 
 const AudioRecorder = ({ backendUrl }) => {
-  /* -------------------------------------------------- */
-  /*  UI state                                          */
-  /* -------------------------------------------------- */
   const [isRecording, setIsRecording] = useState(false);
   const [headerText, setHeaderText]   = useState('Tap to Shazoom');
   const [result, setResult]           = useState(null);
   const [isLoading, setIsLoading]     = useState(false);
-
   const [showMenu, setShowMenu]       = useState(false);
-  const [theme, setTheme]             = useState('auto');           // 'light' | 'dark' | 'auto'
+  const [theme, setTheme]             = useState('auto');
 
-  /* -------------------------------------------------- */
-  /*  refs                                              */
-  /* -------------------------------------------------- */
   const mediaRecorderRef   = useRef(null);
   const wsRef              = useRef(null);
   const recordingTimeout   = useRef(null);
   const rippleInterval     = useRef(null);
   const buttonWrapperRef   = useRef(null);
-  const mqDark             = useRef(null);                          // matchMedia listener for auto‑theme
+  const mqDark             = useRef(null);
 
-  /* -------------------------------------------------- */
-  /*  THEME handling                                    */
-  /* -------------------------------------------------- */
   useEffect(() => {
     const applyTheme = mode => {
       if (mode === 'dark') {
         document.documentElement.setAttribute('data-theme', 'dark');
-      } else {                                  // light *or* auto‑light
+      } else {
         document.documentElement.removeAttribute('data-theme');
       }
     };
 
-    /* first run ------------------------------------- */
     if (theme === 'auto') {
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       applyTheme(prefersDark ? 'dark' : 'light');
@@ -43,7 +35,6 @@ const AudioRecorder = ({ backendUrl }) => {
       applyTheme(theme);
     }
 
-    /* listen to OS change when in auto mode --------- */
     if (theme === 'auto' && window.matchMedia) {
       mqDark.current = window.matchMedia('(prefers-color-scheme: dark)');
       const handler = e => applyTheme(e.matches ? 'dark' : 'light');
@@ -52,9 +43,6 @@ const AudioRecorder = ({ backendUrl }) => {
     }
   }, [theme]);
 
-  /* -------------------------------------------------- */
-  /*  ripple helper                                     */
-  /* -------------------------------------------------- */
   const spawnRipple = () => {
     if (!buttonWrapperRef.current) return;
     const el = document.createElement('div');
@@ -63,14 +51,9 @@ const AudioRecorder = ({ backendUrl }) => {
     setTimeout(() => el.remove(), 1500);
   };
 
-  /* -------------------------------------------------- */
-  /*  main streaming logic                              */
-  /* -------------------------------------------------- */
   const startStreaming = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      /* build WebSocket url ------------------------- */
       const wsUrl = backendUrl.replace(/^http(s?):/, m => (m === 'https:' ? 'wss:' : 'ws:')) + '/stream';
 
       const ws = new WebSocket(wsUrl);
@@ -100,14 +83,12 @@ const AudioRecorder = ({ backendUrl }) => {
 
       ws.onmessage = evt => {
         const data = JSON.parse(evt.data);
-
         if (
           data.song ||
           data.result ||
           data.error ||
           data.status === 'No match found after recording'
         ) {
-          /* ------ display result ------------------- */
           if (data.status === 'No match found after recording') {
             setResult({ result: 'No match found' });
           } else if (data.song) {
@@ -118,7 +99,6 @@ const AudioRecorder = ({ backendUrl }) => {
             setResult({ error: data.error });
           }
 
-          /* ------ cleanup -------------------------- */
           setHeaderText('Tap to Shazoom');
           mediaRecorderRef.current?.state !== 'inactive' && mediaRecorderRef.current.stop();
           clearTimeout(recordingTimeout.current);
@@ -131,11 +111,9 @@ const AudioRecorder = ({ backendUrl }) => {
       };
 
       ws.onerror = e => console.error('WebSocket error:', e);
-
       ws.onclose = () => {
         mediaRecorderRef.current?.state !== 'inactive' && mediaRecorderRef.current.stop();
-        const tracks = stream.getTracks();        // <-- stream from getUserMedia
-        tracks.forEach(track => track.stop());    // <-- actually shuts off mic
+        stream.getTracks().forEach(track => track.stop());
         clearTimeout(recordingTimeout.current);
         clearInterval(rippleInterval.current);
         buttonWrapperRef.current?.querySelectorAll('.ripple').forEach(r => r.remove());
@@ -149,9 +127,6 @@ const AudioRecorder = ({ backendUrl }) => {
     }
   };
 
-  /* -------------------------------------------------- */
-  /*  click handler                                     */
-  /* -------------------------------------------------- */
   const handleRecordClick = () => {
     if (!isRecording) {
       setResult(null);
@@ -161,68 +136,25 @@ const AudioRecorder = ({ backendUrl }) => {
     }
   };
 
-  /* -------------------------------------------------- */
-  /*  JSX                                               */
-  /* -------------------------------------------------- */
   return (
     <div className="audio-recorder">
-      {/* ☰ hamburger */}
-      <div className="hamburger" onClick={() => setShowMenu(true)}>☰</div>
+      <SettingsDrawer
+        showMenu={showMenu}
+        setShowMenu={setShowMenu}
+        theme={theme}
+        setTheme={setTheme}
+      />
 
-      {/* sliding drawer */}
-      <div className={`drawer ${showMenu ? 'open' : ''}`}>
-        <button className="close-btn" onClick={() => setShowMenu(false)}>✕</button>
-        <h3 style={{ textAlign: 'center', marginTop: '2rem' }}>Settings</h3>
-
-        <div className="mode-options">
-          <button
-            className={theme === 'light' ? 'active' : ''}
-            onClick={() => setTheme('light')}
-            title="Light mode"
-          >
-            <img src={`${process.env.PUBLIC_URL}/buttons/light_mode.png`} alt="" />
-          </button>
-          
-          <button
-            className={theme === 'dark' ? 'active' : ''}
-            onClick={() => setTheme('dark')}
-            title="Dark mode"
-          >
-            <img src={`${process.env.PUBLIC_URL}/buttons/dark_mode.png`} alt="" />
-          </button>
-
-          <button
-            className={theme === 'auto' ? 'active' : ''}
-            onClick={() => setTheme('auto')}
-            title="Auto mode"
-          >
-            <img src={`${process.env.PUBLIC_URL}/buttons/dark-light_mode.png`} alt="" />
-          </button>
-        </div>
-      </div>
-
-      {/* main UI ------------------------------------- */}
       <h2 className="recorder-title">{headerText}</h2>
 
-      <div ref={buttonWrapperRef} className="button-wrapper">
-        <button
-          onClick={handleRecordClick}
-          className={`record-button ${isRecording ? 'recording' : ''} ${isLoading ? 'loading' : ''}`}
-          disabled={isRecording}
-        />
-      </div>
+      <RecorderButton
+        handleRecordClick={handleRecordClick}
+        isRecording={isRecording}
+        isLoading={isLoading}
+        buttonWrapperRef={buttonWrapperRef}
+      />
 
-      {result && (
-        <div className="result">
-          {result.song ? (
-            <p>Recognized Song: {result.song} by {result.artist}</p>
-          ) : result.error ? (
-            <p>Error: {result.error}</p>
-          ) : (
-            <p>No match found</p>
-          )}
-        </div>
-      )}
+      {result && <ResultDisplay result={result} />}
     </div>
   );
 };
