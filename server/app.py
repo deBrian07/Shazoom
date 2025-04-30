@@ -13,6 +13,13 @@ from utils.utils import (
     accumulate_votes_for_hash,
     merge_votes
 )
+
+from utils.constants import (
+    ALLOWED_ORIGINS, BATCH_SIZE, BIN_WIDTH, DEV_MODE,
+    MAX_RECORDING, MIN_VOTES, MONGO_URI,
+    RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM, WORKERS
+)
+
 import time
 import asyncio
 import uvloop
@@ -22,15 +29,42 @@ from itertools import chain
 from io import BytesIO
 import json
 import psutil
+import pymongo
+from concurrent.futures import ProcessPoolExecutor
+
+# Shared globals for worker processes
+_worker_client = None
+_worker_db = None
+_worker_col = None
+
+def _init_worker(uri, dev_mode):
+    """
+    Initializer for process pool: create a MongoClient once per worker process.
+    """
+    global _worker_client, _worker_db, _worker_col
+    _worker_client = pymongo.MongoClient(uri, maxPoolSize=500)
+    _worker_db = _worker_client["musicDB_dev" if dev_mode else "musicDB"]
+    _worker_col = _worker_db["fingerprints"]
+
+# Synchronous batch fetch using pre-initialized worker client
+def _fetch_batch_sync(batch):
+    # Use the global _worker_col initialized in each worker
+    docs = list(_worker_col.find(
+        {"hash": {"$in": batch}},
+        {"hash": 1, "song_id": 1, "offset": 1}
+    ))
+    return docs
+
+# Process pool executor for DB fetch parallelism with initializer
+_process_pool = ProcessPoolExecutor(
+    max_workers=10,
+    initializer=_init_worker,
+    initargs=(MONGO_URI, DEV_MODE)
+)
 import sys
 import gc
 from contextlib import contextmanager
 
-from utils.constants import (
-    ALLOWED_ORIGINS, BATCH_SIZE, BIN_WIDTH, DEV_MODE,
-    MAX_RECORDING, MIN_VOTES, MONGO_URI,
-    RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM, WORKERS
-)
 
 
 # --- Timing helper ---
@@ -171,23 +205,19 @@ async def stream():
                 query_hashes[h].append(q_offset)
             hash_list = list(query_hashes.keys())
 
-            # ---- cached DB lookup for new hashes (parallelized) ----
+            # ---- cached DB lookup for new hashes (process-parallel) ----
             with timer("db_find"):
                 to_fetch = [h for h in hash_list if h not in db_cache]
                 # split into batches to avoid huge $in lists
                 batches = [to_fetch[i:i+BATCH_SIZE] for i in range(0, len(to_fetch), BATCH_SIZE) if to_fetch[i:i+BATCH_SIZE]]
-                # limit concurrency to 6 simultaneous queries
-                sem = asyncio.Semaphore(6)
-                async def fetch(batch):
-                    async with sem:
-                        return await fingerprints_col.find(
-                            {"hash": {"$in": batch}},
-                            {"hash": 1, "song_id": 1, "offset": 1}
-                        ).to_list(length=None)
-                # launch all batch fetches in parallel and merge as they complete
-                tasks = [asyncio.create_task(fetch(batch)) for batch in batches]
-                for coro in asyncio.as_completed(tasks):
-                    fresh_docs = await coro
+                # use process pool to fetch batches concurrently
+                loop = asyncio.get_event_loop()
+                tasks = [
+                    loop.run_in_executor(_process_pool, _fetch_batch_sync, batch)
+                    for batch in batches
+                ]
+                for future in asyncio.as_completed(tasks):
+                    fresh_docs = await future
                     for doc in fresh_docs:
                         db_cache.setdefault(doc["hash"], []).append((doc["song_id"], doc["offset"]))
 
