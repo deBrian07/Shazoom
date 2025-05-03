@@ -8,7 +8,7 @@
     margin-top: 16px;
   
     /* ← add this: */
-    transform: scale(1.3);
+    transform: scale(1.4);
     transform-origin: center top;
   }
   
