@@ -17,7 +17,7 @@ from utils.utils import (
 from utils.constants import (
     ALLOWED_ORIGINS, BATCH_SIZE, BIN_WIDTH, DEV_MODE,
     MAX_RECORDING, MIN_VOTES, MONGO_URI,
-    RAM_THRESHOLD_BYTES, THRESHOLD_TIME, TO_PREWARM, WORKERS
+    RAM_THRESHOLD_BYTES, SLIDING_WINDOW_SECS, THRESHOLD_TIME, TO_PREWARM, WORKERS
 )
 
 import time
@@ -151,7 +151,7 @@ async def stream():
     WebSocket endpoint for real-time streaming recognition.
     Logic:
       - Start receiving audio chunks from the client.
-      - Record for up to 15 seconds (max_recording).
+      - Record for up to MAX_RECORDING seconds.
       - Do not try matching until at least 5 seconds have elapsed.
       - Every second thereafter, process the currently accumulated audio,
         generate fingerprints, query the DB, and compute votes.
@@ -182,20 +182,27 @@ async def stream():
         if elapsed > THRESHOLD_TIME and (time.time() - last_match_time) >= 1:
             data = audio_buffer.getvalue()
             buf = BytesIO(data)
-            try:
-                samples, sample_rate = audio_file_to_samples(buf)
-            except Exception as e:
-                await websocket.send(json.dumps({"error": str(e)}))
-                continue
-            
-            # track processing start
+            # ---- fingerprint generation (sliding window incremental) ----
+            # mark processing start time
             processing_start = time.time()
-
-            # ---- fingerprint generation ----
-            with timer("generate_fps"):
-                query_fps = generate_fingerprints_multiresolution(samples, sample_rate)
+            # compute samples and rate from full buffer
+            with timer("audio_to_samples"):
+                samples, sample_rate = audio_file_to_samples(buf)
+            # extract only the last SLIDING_WINDOW_SECS of audio
+            window_size = int(SLIDING_WINDOW_SECS * sample_rate)
+            if len(samples) > window_size:
+                chunk_samples = samples[-window_size:]
+                window_start_time = elapsed - SLIDING_WINDOW_SECS
+            else:
+                chunk_samples = samples
+                window_start_time = 0.0
+            # generate fingerprints on the recent chunk
+            with timer("generate_chunk_fps"):
+                chunk_fps = generate_fingerprints_multiresolution(chunk_samples, sample_rate)
+            # adjust offsets to global timeline
+            query_fps = [(h, t + window_start_time) for (h, t) in chunk_fps]
             if not query_fps:
-                await websocket.send(json.dumps({"status": "No fingerprints yet."}))
+                await websocket.send(json.dumps({"status": "No new fingerprints yet."}))
                 last_match_time = time.time()
                 continue
             

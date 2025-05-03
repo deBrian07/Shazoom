@@ -26,6 +26,10 @@ THRESHOLD_TIME = 4.0       # initial wait time before matching (seconds)
 RAM_THRESHOLD_BYTES = 58 * 1024 ** 3  # 58 GB, used in RAM-monitoring
 
 TO_PREWARM = 5000  # reduce if memory is tight
-BATCH_SIZE = 500
+BATCH_SIZE = 1000
 
 WORKERS = 8
+
+
+# define sliding window length in seconds
+SLIDING_WINDOW_SECS = 2.0
