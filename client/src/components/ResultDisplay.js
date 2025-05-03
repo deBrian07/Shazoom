@@ -1,30 +1,38 @@
+// ResultDisplay.js
 import React, { useState, useEffect } from 'react';
 import './ResultDisplay.css';
 
-// optional: import a local placeholder if you prefer
-// import placeholder from '../assets/placeholder_album.png';
-
 const ResultDisplay = ({ result }) => {
   const [cover, setCover] = useState(
-    result.coverUrl || process.env.PUBLIC_URL + '/placeholder_album.png'
+    process.env.PUBLIC_URL + '/no_image.png'
   );
 
   useEffect(() => {
-    // only fetch if backend didn’t give us art
-    if (!result.coverUrl) {
+    // only attempt JSONP if we don’t already have a coverUrl
+    if (!result.coverUrl && result.song) {
       const term = encodeURIComponent(`${result.song} ${result.artist || ''}`);
-      fetch(`https://itunes.apple.com/search?term=${term}&limit=1&entity=song`)
-        .then(res => res.json())
-        .then(json => {
-          if (json.results?.length) {
-            // artworkUrl100 is 100×100px; swap for a larger size
-            const artUrl = json.results[0].artworkUrl100.replace('100x100', '300x300');
-            setCover(artUrl);
-          }
-        })
-        .catch(() => {
-          // swallow errors, keep placeholder
-        });
+      const callbackName = `deezer_cb_${Date.now()}`;
+
+      // install the callback
+      window[callbackName] = data => {
+        if (data && data.data && data.data.length > 0) {
+          // grab the big cover if available
+          setCover(data.data[0].album.cover_big);
+        }
+        // cleanup
+        document.body.removeChild(script);
+        delete window[callbackName];
+      };
+
+      // insert JSONP script tag
+      const script = document.createElement('script');
+      script.src = `https://api.deezer.com/search?q=${term}&limit=1&output=jsonp&callback=${callbackName}`;
+      document.body.appendChild(script);
+    }
+
+    // if backend ever sends a direct URL, prefer it
+    if (result.coverUrl) {
+      setCover(result.coverUrl);
     }
   }, [result.song, result.artist, result.coverUrl]);
 
@@ -43,8 +51,7 @@ const ResultDisplay = ({ result }) => {
         src={cover}
         alt={`${result.song} album cover`}
         onError={e => {
-          // if fetch URL 404s, fall back to placeholder
-          e.currentTarget.onerror = null;
+          // fallback to placeholder if that also 404s
           e.currentTarget.src = process.env.PUBLIC_URL + '/no_image.png';
         }}
       />
