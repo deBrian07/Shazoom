@@ -1,21 +1,40 @@
-/* ResultDisplay.css */
-.result-container {
+/* Light mode variables (default) */
+:root {
+    --card-bg: rgba(255, 255, 255, 0.8);
+    --card-hover-bg: rgba(255, 255, 255, 0.9);
+    --text-primary: #000;
+    --text-secondary: #333;
+  }
+  
+  /* Dark mode overrides */
+  html[data-theme="dark"] {
+    --card-bg: #1a1a1a;
+    --card-hover-bg: #2a2a2a;
+    --text-primary: #fff;
+    --text-secondary: #ccc;
+  }
+  
+  /* Container for the result card */
+  .result-container {
     display: flex;
     align-items: center;
-    background-color: var(--card-bg, #1a1a1a);
+    background-color: var(--card-bg);
     border-radius: 12px;
     padding: 12px;
     margin-top: 16px;
+    transition: background-color 0.2s ease;
   
-    /* ← add this: */
+    /* Scale the card up for better visibility */
     transform: scale(1.4);
     transform-origin: center top;
   }
   
+  /* Hover effect when clickable */
   .result-container:hover {
-    background-color: var(--card-hover-bg, #2a2a2a);
+    background-color: var(--card-hover-bg);
   }
   
+  /* Album cover thumbnail */
   .album-cover {
     width: 64px;
     height: 64px;
@@ -25,29 +44,37 @@
     flex-shrink: 0;
   }
   
+  /* Info block beside cover */
   .song-info {
     display: flex;
     flex-direction: column;
     justify-content: center;
   }
   
+  /* Song title styling */
   .song-title {
     font-size: 1.1rem;
     font-weight: 600;
-    color: var(--text-primary, #fff);
+    color: var(--text-primary);
     margin: 0;
   }
   
+  /* Artist name styling */
   .song-artist {
     font-size: 0.9rem;
-    color: var(--text-secondary, #ccc);
+    color: var(--text-secondary);
     margin: 4px 0 0;
   }
   
-  /* empty state */
+  /* Empty state */
   .result-container.empty {
     justify-content: center;
     padding: 24px;
     background-color: transparent;
+  }
+  
+  .result-container.empty p {
+    color: var(--text-secondary);
+    margin: 0;
   }
   
