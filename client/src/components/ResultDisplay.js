@@ -1,39 +1,40 @@
-// ResultDisplay.js
 import React, { useState, useEffect } from 'react';
+import fetchJsonp from 'fetch-jsonp';
 import './ResultDisplay.css';
 
 const ResultDisplay = ({ result }) => {
   const [cover, setCover] = useState(
-    process.env.PUBLIC_URL + '/no_image.png'
+    process.env.PUBLIC_URL + '/placeholder_album.png'
   );
 
   useEffect(() => {
-    // only attempt JSONP if we don’t already have a coverUrl
-    if (!result.coverUrl && result.song) {
-      const term = encodeURIComponent(`${result.song} ${result.artist || ''}`);
-      const callbackName = `deezer_cb_${Date.now()}`;
-
-      // install the callback
-      window[callbackName] = data => {
-        if (data && data.data && data.data.length > 0) {
-          // grab the big cover if available
-          setCover(data.data[0].album.cover_big);
-        }
-        // cleanup
-        document.body.removeChild(script);
-        delete window[callbackName];
-      };
-
-      // insert JSONP script tag
-      const script = document.createElement('script');
-      script.src = `https://api.deezer.com/search?q=${term}&limit=1&output=jsonp&callback=${callbackName}`;
-      document.body.appendChild(script);
-    }
-
-    // if backend ever sends a direct URL, prefer it
+    // Trust backend-provided cover if available
     if (result.coverUrl) {
       setCover(result.coverUrl);
+      return;
     }
+
+    // Require a song title
+    if (!result.song) return;
+
+    // Use Deezer JSONP via fetch-jsonp (no manual script tags)
+    const term = encodeURIComponent(
+      `${result.song}${result.artist ? ' ' + result.artist : ''}`
+    );
+    const deezerUrl =
+      `https://api.deezer.com/search?q=${term}` +
+      `&limit=1&output=jsonp`;
+
+    fetchJsonp(deezerUrl, { jsonpCallback: 'callback' })
+      .then(response => response.json())
+      .then(data => {
+        if (data.data?.length) {
+          setCover(data.data[0].album.cover_big);
+        }
+      })
+      .catch(() => {
+        // fallback to placeholder on error
+      });
   }, [result.song, result.artist, result.coverUrl]);
 
   const spotifyUrl =
@@ -49,10 +50,10 @@ const ResultDisplay = ({ result }) => {
       <img
         className="album-cover"
         src={cover}
-        alt={`${result.song} album cover`}
+        alt={`${result.song} cover`}
         onError={e => {
-          // fallback to placeholder if that also 404s
-          e.currentTarget.src = process.env.PUBLIC_URL + '/no_image.png';
+          e.currentTarget.onerror = null;
+          e.currentTarget.src = process.env.PUBLIC_URL + '/placeholder_album.png';
         }}
       />
       <div className="song-info">
