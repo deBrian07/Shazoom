@@ -189,6 +189,8 @@ async def stream():
     start_time = time.time()
     last_match_time = time.time()
     match_result = None
+    # accumulate all fingerprint offsets across chunks
+    query_hashes = defaultdict(list)
     
     await websocket.send(json.dumps({"status": "Recording started"}))
     
@@ -226,17 +228,18 @@ async def stream():
             # generate fingerprints on the recent chunk
             with timer("generate_chunk_fps"):
                 chunk_fps = generate_fingerprints_multiresolution(chunk_samples, sample_rate)
-            # adjust offsets to global timeline
-            query_fps = [(h, t + window_start_time) for (h, t) in chunk_fps]
-            if not query_fps:
+            # accumulate new fingerprints into the global query_hashes
+            new_hashes = set()
+            for h, t in chunk_fps:
+                offset = t + window_start_time
+                query_hashes[h].append(offset)
+                new_hashes.add(h)
+            # if no new hashes, skip
+            if not new_hashes:
                 await websocket.send(json.dumps({"status": "No new fingerprints yet."}))
                 last_match_time = time.time()
                 continue
-            
-            # group query hashes
-            query_hashes = defaultdict(list)
-            for h, q_offset in query_fps:
-                query_hashes[h].append(q_offset)
+            # build the full list of hashes for DB lookup and voting
             hash_list = list(query_hashes.keys())
 
             # ---- cached DB lookup for new hashes (process-parallel) ----
