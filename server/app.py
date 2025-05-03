@@ -57,12 +57,34 @@ def _fetch_batch_sync(batch):
 
 # Process pool executor for DB fetch parallelism with initializer
 _process_pool = ProcessPoolExecutor(
-    max_workers=10,
+    max_workers=16,
     initializer=_init_worker,
     initargs=(MONGO_URI, DEV_MODE)
 )
+
 import sys
 import gc
+
+# --- Background: refresh hot songs cache ---
+async def _refresh_hot_songs():
+    """
+    Periodically load the top HOT_SONGS_K frequent songs and cache their fingerprints.
+    """
+    while True:
+        # fetch top-K songs by persistent count
+        cursor = hits_col.find({}, {"song_id": 1, "count": 1}).sort("count", -1).limit(HOT_SONGS_K)
+        hot_songs = [doc["song_id"] async for doc in cursor]
+        # preload fingerprints for each hot song
+        for song_id in hot_songs:
+            docs = await fingerprints_col.find(
+                {"song_id": song_id},
+                {"hash": 1, "song_id": 1, "offset": 1}
+            ).to_list(length=None)
+            for doc in docs:
+                db_cache.setdefault(doc["hash"], []).append((doc["song_id"], doc["offset"]))
+        # wait an 5 mins before refreshing
+        await asyncio.sleep(300)
+
 from contextlib import contextmanager
 
 
@@ -89,6 +111,10 @@ else:
 
 songs_col = db["songs"]
 fingerprints_col = db["fingerprints"]
+# Persistent collection for tracking match counts
+hits_col = db["song_hits"]
+# Number of top songs to cache in memory
+HOT_SONGS_K = 1000
 
 db_cache = {}
 
@@ -122,9 +148,10 @@ async def ensure_index():
         "wiredTigerEngineRuntimeConfig": f"cache_size={cache_gb}G"
     })
     print(f"WiredTiger cache size set to {cache_gb}G")
-    # schedule cache prewarm and RAM monitor tasks
+    # schedule cache prewarm, RAM monitor, and hot-songs refresh tasks
     asyncio.create_task(_prewarm_hot_hashes())
     asyncio.create_task(_monitor_ram())
+    asyncio.create_task(_refresh_hot_songs())
 
 async def _prewarm_hot_hashes():
     # identify most frequent hashes (for OS cache warm-up only)
@@ -268,6 +295,12 @@ async def stream():
                     best_song_id, best_delta = best_match
                     song = await songs_col.find_one({"_id": best_song_id})
                     if song:
+                        # increment persistent hit count
+                        await hits_col.update_one(
+                            {"song_id": best_song_id},
+                            {"$inc": {"count": 1}},
+                            upsert=True
+                        )
                         match_result = {
                             "song": song.get("title"),
                             "artist": song.get("artist"),
