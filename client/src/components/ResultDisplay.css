@@ -1,0 +1,53 @@
+/* ResultDisplay.css */
+.result-container {
+    display: flex;
+    align-items: center;
+    background-color: var(--card-bg, #1a1a1a);
+    border-radius: 12px;
+    padding: 12px;
+    margin-top: 16px;
+  
+    /* ← add this: */
+    transform: scale(1.4);
+    transform-origin: center top;
+  }
+  
+  .result-container:hover {
+    background-color: var(--card-hover-bg, #2a2a2a);
+  }
+  
+  .album-cover {
+    width: 64px;
+    height: 64px;
+    border-radius: 8px;
+    object-fit: cover;
+    margin-right: 12px;
+    flex-shrink: 0;
+  }
+  
+  .song-info {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  
+  .song-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary, #fff);
+    margin: 0;
+  }
+  
+  .song-artist {
+    font-size: 0.9rem;
+    color: var(--text-secondary, #ccc);
+    margin: 4px 0 0;
+  }
+  
+  /* empty state */
+  .result-container.empty {
+    justify-content: center;
+    padding: 24px;
+    background-color: transparent;
+  }
+  
