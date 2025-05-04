@@ -16,7 +16,7 @@ from utils.utils import (
 
 from utils.constants import (
     ALLOWED_ORIGINS, BATCH_SIZE, BIN_WIDTH, DEV_MODE,
-    MAX_RECORDING, MIN_VOTES, MONGO_URI,
+    MAX_RECORDING, MIN_HASHES, MIN_VOTES, MONGO_URI,
     RAM_THRESHOLD_BYTES, SLIDING_WINDOW_SECS, THRESHOLD_TIME, TO_PREWARM, WORKERS
 )
 
@@ -82,6 +82,8 @@ async def _refresh_hot_songs():
             ).to_list(length=None)
             for doc in docs:
                 db_cache.setdefault(doc["hash"], []).append((doc["song_id"], doc["offset"]))
+
+        print("Cache refreshed")
         # wait an 5 mins before refreshing
         await asyncio.sleep(300)
 
@@ -273,8 +275,8 @@ async def stream():
             # ---- vote tallying (vectorized with early exit) ----
             with timer("vote_tally"):
                 global_votes = Counter()
+                hashes_seen = 0
                 early = False
-                early_match = None
                 for h, query_offsets in query_hashes.items():
                     docs = db_group.get(h)
                     if not docs:
@@ -285,12 +287,17 @@ async def stream():
                     for (song_id, delta), cnt in votes.items():
                         key = (song_id, delta)
                         global_votes[key] += cnt * w
-                        if global_votes[key] >= MIN_VOTES:
+                    hashes_seen += 1
+                    # allow early exit only after at least 25 hashes processed
+                    if hashes_seen >= MIN_HASHES and len(global_votes) >= 2:
+                        # get top two candidates for robustness check
+                        top_two = global_votes.most_common(2)
+                        (best_key, best_score), (_, second_score) = top_two
+                        if best_score >= MIN_VOTES and best_score >= second_score * 1.2:  # 20% margin
                             early = True
-                            early_match = key
                             break
-                    if early:
-                        break
+                # no outer-loop break; assess final global_votes instead
+                # end hash loop
 
             if global_votes:
                 best_match, best_votes = global_votes.most_common(1)[0]
