@@ -21,6 +21,7 @@ MIN_VOTES = 30             # min vote count to accept a match
 BIN_WIDTH = 0.2            # time-delta quantization width (seconds)
 MAX_RECORDING = 9.0        # max recording duration (seconds)
 THRESHOLD_TIME = 4.0       # initial wait time before matching (seconds)
+MIN_HASHES = 10
 
 # System parameters
 RAM_THRESHOLD_BYTES = 58 * 1024 ** 3  # 58 GB, used in RAM-monitoring
