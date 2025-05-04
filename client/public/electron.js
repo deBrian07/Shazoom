@@ -1,10 +1,20 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, systemPreferences } = require('electron');
 const path = require('path');
 
+async function ensureMicPermission() {
+  const granted = await systemPreferences.askForMediaAccess('microphone');
+  if (!granted) {
+    console.warn('Microphone permission denied');
+  }
+}
+
 function createWindow() {
+  const { screen } = require('electron');
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
   const win = new BrowserWindow({
-    width: 400,
-    height: 700,
+    width: Math.round(width * 0.8),
+    height: Math.round(height * 0.8),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -23,7 +33,10 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  await ensureMicPermission();  // ← request mic access here
+  createWindow();               // ← then open your window
+});
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
