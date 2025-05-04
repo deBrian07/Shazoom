@@ -9,9 +9,12 @@ async function ensureMicPermission() {
 }
 
 function createWindow() {
+  const { screen } = require('electron');
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
   const win = new BrowserWindow({
-    width: 400,
-    height: 700,
+    width: Math.round(width * 0.8),
+    height: Math.round(height * 0.8),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
