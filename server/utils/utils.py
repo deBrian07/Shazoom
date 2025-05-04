@@ -5,6 +5,7 @@ from pydub import AudioSegment
 
 from numba import njit, types
 from numba.typed import Dict as TypedDict
+from utils.constants import FANOUT, FILTER_COEF, FINGERPRINT_CONFIGS, THRESHOLD_MULTIPLIER, WINDOW_SECS
 
 def low_pass_filter(samples, cutoff, sample_rate):
     """Applies a first‐order low‐pass filter with cutoff frequency (Hz)."""
@@ -133,18 +134,15 @@ def generate_fingerprints(samples, sample_rate,
     return fingerprints
 
 def generate_fingerprints_multiresolution(samples, sample_rate):
-    configs = [
-        (4096, 1024, "high_freq"),
-        (1024, 256, "high_time")
-    ]
+    configs = FINGERPRINT_CONFIGS
     all_fps = []
     for window_size, hop_size, version in configs:
         fps = generate_fingerprints(
             samples, sample_rate,
-            threshold_multiplier=4,  # Tune 
-            filter_coef=0.7,         # Tune 
-            fanout=7,                # Tune: smaller fanout yields fewer pairings
-            window_secs=5.0,
+            threshold_multiplier=THRESHOLD_MULTIPLIER,  # Tune 
+            filter_coef=FILTER_COEF,         # Tune 
+            fanout=FANOUT,                # Tune: smaller fanout yields fewer pairings
+            window_secs=WINDOW_SECS,
             window_size=window_size,
             hop_size=hop_size,
             band_boundaries=None  
@@ -156,11 +154,6 @@ def generate_fingerprints_multiresolution(samples, sample_rate):
 # --- Numba-accelerated helper ---
 @njit
 def accumulate_votes_for_hash(query_offsets, db_offset, bin_width):
-    """
-    For a single hash, given an array of query candidate offsets and a db offset,
-    accumulate votes per binned delta. Returns a dict mapping binned_delta (float64) to count (int64).
-    (We use numba.typed.Dict as a typed dictionary.)
-    """
     votes = TypedDict.empty(key_type=types.float64, value_type=types.int64)
     for i in range(query_offsets.shape[0]):
         delta = db_offset - query_offsets[i]
@@ -175,3 +168,58 @@ def merge_votes(global_votes, new_votes, song_id):
     for key in new_votes:
         global_key = (song_id, key)
         global_votes[global_key] = global_votes.get(global_key, 0) + new_votes[key]
+
+def accumulate_votes_vectorized(query_offsets, docs, bin_width):
+    """
+    Vectorized vote tally for one hash:
+      - query_offsets: 1D numpy array of offsets for this hash
+      - docs: list of (song_id, db_offset) tuples
+      - bin_width: width of each time‑delta bin
+    Returns:
+      dict: {(song_id, delta): count}
+    """
+    # Determine workload size
+    total_pairs = len(docs) * len(query_offsets)
+    votes = {}
+
+    if total_pairs < 1000:
+        # Small case: use existing Numba helper for each doc
+        for song_id, db_offset in docs:
+            sub = accumulate_votes_for_hash(query_offsets, db_offset, bin_width)
+            for delta, cnt in sub.items():
+                key = (song_id, delta)
+                votes[key] = votes.get(key, 0) + cnt
+    else:
+        # Large case: vectorized across all docs and offsets
+        # Map song_ids to integer indices for array operations
+        unique_sids = []
+        sid_to_idx = {}
+        for sid, _ in docs:
+            if sid not in sid_to_idx:
+                sid_to_idx[sid] = len(unique_sids)
+                unique_sids.append(sid)
+        song_idx_arr = np.array([sid_to_idx[sid] for sid, _ in docs], dtype=np.int64)
+        db_offsets = np.array([offset for _, offset in docs], dtype=np.float64)
+
+        # Compute pairwise deltas and quantize
+        deltas = db_offsets[:, None] - query_offsets[None, :]
+        binned = np.round(deltas / bin_width) * bin_width
+
+        # Flatten for counting
+        flat_idxs = np.repeat(song_idx_arr, len(query_offsets))
+        flat_deltas = binned.ravel()
+
+        # Structured array to count unique pairs
+        pairs = np.empty(flat_idxs.shape[0], dtype=[('idx', 'i8'), ('delta', 'f8')])
+        pairs['idx'] = flat_idxs
+        pairs['delta'] = flat_deltas
+        uniq, counts = np.unique(pairs, return_counts=True)
+
+        # Build result dict mapping back to original song_ids
+        for entry, cnt in zip(uniq, counts):
+            sid = unique_sids[int(entry['idx'])]
+            delta = float(entry['delta'])
+            key = (sid, delta)
+            votes[key] = cnt
+
+    return votes

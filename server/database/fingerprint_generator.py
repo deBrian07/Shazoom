@@ -4,13 +4,18 @@ import numpy as np
 from pymongo import MongoClient
 from tqdm import tqdm
 import concurrent.futures
-from utils import audio_file_to_samples, generate_fingerprints_multiresolution
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(__file__, "..", "..")))
+
+from utils.constants import DEV_MODE, MONGO_URI
+from utils.utils import audio_file_to_samples, generate_fingerprints_multiresolution
 
 def process_song(song, songs_col, fingerprints_col):
     if songs_col.find_one({"title": song["title"], "artist": song["artist"]}):
         return f"Skipping '{song['title']}' by {song['artist']}: Already exists."
     
-    file_path = song["file"]
+    file_path = os.path.join("download", song["file"])
     try:
         with open(file_path, "rb") as f:
             samples, sr = audio_file_to_samples(f)
@@ -33,10 +38,8 @@ def process_song(song, songs_col, fingerprints_col):
 
 def main():
     # Connect to MongoDB.
-    MONGO_URI = "mongodb://localhost:27017"
     client = MongoClient(MONGO_URI)
 
-    DEV_MODE = False  # True when testing something (change to False before commiting)
     if DEV_MODE:
         db = client["musicDB_dev"]
     else:
@@ -46,7 +49,7 @@ def main():
     fingerprints_col = db["fingerprints"]
     fingerprints_col.create_index("hash")
     
-    csv_path = os.path.join("..", "download", "processed.csv")
+    csv_path = os.path.join("download", "processed.csv")
     songs_to_add = []
     try:
         with open(csv_path, "r", newline="", encoding="utf-8") as csvfile:

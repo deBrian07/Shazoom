@@ -1,9 +1,13 @@
 from pymongo import MongoClient
 
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(__file__, "..", "..")))
+
+from utils.constants import DEV_MODE
+
 # Connect to your MongoDB instance.
 client = MongoClient("mongodb://localhost:27017/")
 
-DEV_MODE = False  # True when testing something (change to False before commiting)
 if DEV_MODE:
     db = client["musicDB_dev"]
 else:
