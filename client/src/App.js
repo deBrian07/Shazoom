@@ -4,7 +4,7 @@ import './App.css';
 
 function App() {
   // Replace <YOUR_BACKEND_URL> with the actual URL of your Flask backend, e.g., "http://47.229.136.34:5000"
-  const backendUrl = "https://www.infinia.chat";
+  const backendUrl = "https://api.shazoom.app";
 
   return (
     <div className="App">
