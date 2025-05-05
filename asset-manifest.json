@@ -1,14 +1,14 @@
 {
   "files": {
-    "main.css": "/Shazoom/static/css/main.53182461.css",
-    "main.js": "/Shazoom/static/js/main.21884616.js",
-    "static/media/Microphone.png": "/Shazoom/static/media/Microphone.c97bdae2deab66b98b2f.png",
-    "index.html": "/Shazoom/index.html",
-    "main.53182461.css.map": "/Shazoom/static/css/main.53182461.css.map",
-    "main.21884616.js.map": "/Shazoom/static/js/main.21884616.js.map"
+    "main.css": "/static/css/main.2b9ae9e7.css",
+    "main.js": "/static/js/main.75e23c1e.js",
+    "static/media/Microphone.png": "/static/media/Microphone.c97bdae2deab66b98b2f.png",
+    "index.html": "/index.html",
+    "main.2b9ae9e7.css.map": "/static/css/main.2b9ae9e7.css.map",
+    "main.75e23c1e.js.map": "/static/js/main.75e23c1e.js.map"
   },
   "entrypoints": [
-    "static/css/main.53182461.css",
-    "static/js/main.21884616.js"
+    "static/css/main.2b9ae9e7.css",
+    "static/js/main.75e23c1e.js"
   ]
 }
