@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "description": "Music recognition app built with React and Electron",
   "author": "Brian Chen",
-  "homepage": "https://debrian07.github.io/Shazoom",
+  "homepage": ".",
   "main": "electron.js",
   "private": true,
   "scripts": {
