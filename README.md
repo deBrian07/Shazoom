@@ -1,6 +1,10 @@
 [demo](https://debrian07.github.io/Shazoom/)
 # Shazoom
 Shazoom is an implementation of Shazam's song recognition algorithm. It uses YouTube to find and download songs. It is based on [source](https://github.com/cgzirim/seek-tune).
+<div align="center">
+<img src="https://github.com/user-attachments/assets/cb93fadf-cd39-4320-80f4-dcc7f7bbeaa1" alt="Alt Text" style="width:35%; height:auto;">
+</div>
+
 ## Steps
 ### Clone the repo
 ```
