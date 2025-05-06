@@ -1,8 +1,41 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import './SettingsDrawer.css';
 
 const SettingsDrawer = ({ showMenu, setShowMenu, theme, setTheme, backendUrl }) => {
   const [suggestion, setSuggestion] = useState('');
   const [status, setStatus] = useState('');
+  const [dropdown, setDropdown] = useState([]);
+  const timerRef = useRef(null);
+
+  // fetch suggestions via iTunes (CORS-friendly)
+  useEffect(() => {
+    clearTimeout(timerRef.current);
+    const q = suggestion.trim();
+    if (!q || q.includes(' - ')) {
+      setDropdown([]);
+      return;
+    }
+    timerRef.current = setTimeout(() => {
+      fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&limit=5&entity=song`)
+        .then(res => res.json())
+        .then(json => {
+          if (json.results) {
+            setDropdown(json.results.map(track => ({
+              title: track.trackName,
+              artist: track.artistName
+            })));
+          }
+        })
+        .catch(() => setDropdown([]));
+    }, 300);
+    return () => clearTimeout(timerRef.current);
+  }, [suggestion]);
+
+  const handleSelect = item => {
+    setSuggestion(`${item.title} - ${item.artist}`);
+    setDropdown([]);
+    setStatus('');
+  };
 
   const handleSuggestionSubmit = async () => {
     if (!suggestion.includes(' - ')) {
@@ -27,7 +60,7 @@ const SettingsDrawer = ({ showMenu, setShowMenu, theme, setTheme, backendUrl }) 
       } else {
         setStatus(data.error || 'Error submitting suggestion');
       }
-    } catch (err) {
+    } catch {
       setStatus('Network error');
     }
   };
@@ -35,7 +68,7 @@ const SettingsDrawer = ({ showMenu, setShowMenu, theme, setTheme, backendUrl }) 
   return (
     <>
       <div className="hamburger" onClick={() => setShowMenu(true)}>☰</div>
-      <div className={`drawer ${showMenu ? 'open' : ''}`}>
+      <div className={`drawer ${showMenu ? 'open' : ''}`}>          
         <button className="close-btn" onClick={() => setShowMenu(false)}>✕</button>
         <h3 style={{ textAlign: 'center', marginTop: '2rem' }}>Settings</h3>
 
@@ -45,26 +78,28 @@ const SettingsDrawer = ({ showMenu, setShowMenu, theme, setTheme, backendUrl }) 
             onClick={() => setTheme('light')}
             title="Light mode"
           >
-            <img src={`${process.env.PUBLIC_URL}/buttons/light_mode.png`} alt="" />
+            <img src={`${process.env.PUBLIC_URL}/buttons/light_mode.png`} alt="Light mode" />
           </button>
           <button
             className={theme === 'dark' ? 'active' : ''}
             onClick={() => setTheme('dark')}
             title="Dark mode"
           >
-            <img src={`${process.env.PUBLIC_URL}/buttons/dark_mode.png`} alt="" />
+            <img src={`${process.env.PUBLIC_URL}/buttons/dark_mode.png`} alt="Dark mode" />
           </button>
           <button
             className={theme === 'auto' ? 'active' : ''}
             onClick={() => setTheme('auto')}
             title="Auto mode"
           >
-            <img src={`${process.env.PUBLIC_URL}/buttons/dark-light_mode.png`} alt="" />
+            <img src={`${process.env.PUBLIC_URL}/buttons/dark-light_mode.png`} alt="Auto mode" />
           </button>
         </div>
 
         <div className="suggestion-container">
-          <label htmlFor="song-suggestion" className="suggestion-label">Got a song we missed?</label>
+          <label htmlFor="song-suggestion" className="suggestion-label">
+            Got a song we missed?
+          </label>
           <input
             id="song-suggestion"
             type="text"
@@ -72,7 +107,21 @@ const SettingsDrawer = ({ showMenu, setShowMenu, theme, setTheme, backendUrl }) 
             onChange={e => setSuggestion(e.target.value)}
             placeholder="Song Title - Artist"
             className="suggestion-input"
+            autoComplete="off"
           />
+          {dropdown.length > 0 && (
+            <ul className="suggestion-list">
+              {dropdown.map((item, i) => (
+                <li
+                  key={i}
+                  className="suggestion-item"
+                  onClick={() => handleSelect(item)}
+                >
+                  {item.title} – {item.artist}
+                </li>
+              ))}
+            </ul>
+          )}
           <button
             className="suggestion-button"
             onClick={handleSuggestionSubmit}
