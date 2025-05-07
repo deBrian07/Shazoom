@@ -137,6 +137,7 @@ const AudioRecorder = ({ backendUrl }) => {
         setShowMenu={setShowMenu}
         theme={theme}
         setTheme={setTheme}
+        backendUrl={backendUrl}
       />
 
       <h2 className="recorder-title">{headerText}</h2>
