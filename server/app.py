@@ -100,7 +100,6 @@ def timer(name: str):
     print(f"[{name}] {t1 - t0:.3f}s")
 
 app = Quart(__name__)
-app = cors(app, allow_origin=ALLOWED_ORIGINS)
 
 # MongoDB connection
 client = AsyncIOMotorClient(MONGO_URI, maxPoolSize=200)  # increased pool size to 200
