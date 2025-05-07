@@ -1,6 +1,6 @@
 # MongoDB configuration
 MONGO_URI = "mongodb://localhost:27017"
-ALLOWED_ORIGINS = ["http://localhost:3000", "https://debrian07.github.io"]
+ALLOWED_ORIGINS = ["http://localhost:3000", "https://debrian07.github.io", "https://www.shazoom.app", "https://api.shazoom.app"]
 
 
 DEV_MODE = True  # True when testing something (change to False before commiting)
@@ -34,3 +34,6 @@ WORKERS = 8
 
 # define sliding window length in seconds
 SLIDING_WINDOW_SECS = 2.0
+
+# Number of top songs to cache in memory
+HOT_SONGS_K = 500

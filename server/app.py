@@ -15,7 +15,7 @@ from utils.utils import (
 )
 
 from utils.constants import (
-    ALLOWED_ORIGINS, BATCH_SIZE, BIN_WIDTH, DEV_MODE,
+    ALLOWED_ORIGINS, BATCH_SIZE, BIN_WIDTH, DEV_MODE, HOT_SONGS_K,
     MAX_RECORDING, MIN_HASHES, MIN_VOTES, MONGO_URI,
     RAM_THRESHOLD_BYTES, SLIDING_WINDOW_SECS, THRESHOLD_TIME, TO_PREWARM, WORKERS
 )
@@ -115,8 +115,6 @@ songs_col = db["songs"]
 fingerprints_col = db["fingerprints"]
 # Persistent collection for tracking match counts
 hits_col = db["song_hits"]
-# Number of top songs to cache in memory
-HOT_SONGS_K = 1000
 
 db_cache = {}
 
@@ -339,6 +337,27 @@ async def _monitor_ram():
             os.execv(sys.executable, [sys.executable] + sys.argv)
         await asyncio.sleep(60)
       
+# ---- REST endpoint to queue new songs ----
+@app.route('/suggest_song', methods=['POST'])
+async def suggest_song():
+    """Receive a song title & artist from the front‑end and append to songs_to_add.csv"""
+    data = await request.get_json()
+    title  = data.get("title",  "").strip()
+    artist = data.get("artist", "").strip()
+    if not title or not artist:
+        return jsonify({"error": "title and artist are required"}), 400
+
+    row = [time.strftime("%Y-%m-%d %H:%M:%S"), title, artist]
+    csv_path = "songs_to_add.csv"
+    # create with header if missing
+    write_header = not os.path.isfile(csv_path)
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["timestamp", "title", "artist"])
+        writer.writerow(row)
+    return jsonify({"status": "queued"}), 200
+
 if __name__ == "__main__":
     # In production, use an ASGI server with multiple workers for concurrency
     import uvicorn
