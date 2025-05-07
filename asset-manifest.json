@@ -1,14 +1,14 @@
 {
   "files": {
     "main.css": "./static/css/main.d00edc13.css",
-    "main.js": "./static/js/main.bf617cf2.js",
+    "main.js": "./static/js/main.6cb34820.js",
     "static/media/Microphone.png": "./static/media/Microphone.c97bdae2deab66b98b2f.png",
     "index.html": "./index.html",
     "main.d00edc13.css.map": "./static/css/main.d00edc13.css.map",
-    "main.bf617cf2.js.map": "./static/js/main.bf617cf2.js.map"
+    "main.6cb34820.js.map": "./static/js/main.6cb34820.js.map"
   },
   "entrypoints": [
     "static/css/main.d00edc13.css",
-    "static/js/main.bf617cf2.js"
+    "static/js/main.6cb34820.js"
   ]
 }
