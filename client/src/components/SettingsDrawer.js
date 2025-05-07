@@ -2,12 +2,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import './SettingsDrawer.css';
 
 const SettingsDrawer = ({ showMenu, setShowMenu, theme, setTheme, backendUrl }) => {
+  // Lock body scroll when drawer is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = 'auto'; };
+  }, [showMenu]);
+
   const [suggestion, setSuggestion] = useState('');
   const [status, setStatus] = useState('');
   const [dropdown, setDropdown] = useState([]);
   const timerRef = useRef(null);
 
-  // fetch suggestions via iTunes (CORS-friendly)
+  // Debounced iTunes suggestions lookup
   useEffect(() => {
     clearTimeout(timerRef.current);
     const q = suggestion.trim();
@@ -16,14 +22,19 @@ const SettingsDrawer = ({ showMenu, setShowMenu, theme, setTheme, backendUrl }) 
       return;
     }
     timerRef.current = setTimeout(() => {
-      fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&limit=5&entity=song`)
+      fetch(
+        `https://itunes.apple.com/search?term=${encodeURIComponent(q)}` +
+        `&limit=5&entity=song`
+      )
         .then(res => res.json())
         .then(json => {
           if (json.results) {
-            setDropdown(json.results.map(track => ({
-              title: track.trackName,
-              artist: track.artistName
-            })));
+            setDropdown(
+              json.results.map(track => ({
+                title: track.trackName,
+                artist: track.artistName,
+              }))
+            );
           }
         })
         .catch(() => setDropdown([]));
