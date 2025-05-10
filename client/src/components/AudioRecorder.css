@@ -231,3 +231,21 @@ html, body, #root, .App {
   height: 100%;
   margin: 0;
 }
+
+
+@media (max-width: 600px) {
+  .audio-recorder {
+    /* tighten up the top padding */
+    padding-top: 1rem;
+  }
+
+  .recorder-title {
+    /* move the “Tap to Shazoom” up */
+    margin-top: 0.56rem !important;
+  }
+
+  .button-wrapper {
+    /* nudge the button upward */
+    margin-top: -1rem;
+  }
+}
