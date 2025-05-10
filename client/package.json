@@ -1,6 +1,6 @@
 {
   "name": "Shazoom",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Music recognition app built with React and Electron",
   "author": "Brian Chen",
   "homepage": "https://shazoom.app/",
