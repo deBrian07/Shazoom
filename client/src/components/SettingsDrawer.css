@@ -1,50 +1,74 @@
+.drawer {
+  position: fixed;
+  top: 0;
+  left: -280px;           /* hide off-screen when closed */
+  bottom: 0;
+  width: 260px;
+  background: var(--card-bg);
+  overflow-y: auto;
+  transition: left 0.3s ease, background-color 0.2s ease;
+  z-index: 1000;
+}
+
+.drawer.open {
+  left: 0;
+}
+
+html:not([data-theme="dark"]) .drawer {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+html[data-theme="dark"] .drawer {
+  background: rgba(40, 50, 60, 0.8);
+}
+
 .suggestion-container {
-    margin-top: 1rem;
-    padding: 1rem 1rem 0;
-    border-top: 1px solid var(--text-secondary);
-    display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-rows: auto auto auto;
-    grid-gap: 0.5rem;
-  }
-  
-  .suggestion-label {
-    grid-column: 1 / -1;
-    text-align: center;
-  }
-  
-  .suggestion-input {
-    grid-column: 1;
-  }
-  
-  .suggestion-button {
-    grid-column: 2;
-  }
-  
-  .suggestion-list {
-    grid-column: 1 / -1;
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    max-height: 8rem;
-    overflow-y: auto;
-    border: 1px solid var(--text-secondary);
-    border-radius: 4px;
-    background: var(--card-bg);
-  }
-  
-  .suggestion-item {
-    padding: 0.5rem;
-    cursor: pointer;
-    color: var(--text-primary);
-  }
-  .suggestion-item:hover {
-    background: var(--card-hover-bg);
-  }
-  
-  .suggestion-status {
-    grid-column: 1 / -1;
-    text-align: center;
-    margin-top: 0.25rem;
-    color: var(--text-secondary);
-  }  
+  margin-top: 1rem;
+  padding: 1rem 1rem 0;
+  border-top: 1px solid var(--text-secondary);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+  grid-gap: 0.5rem;
+}
+
+.suggestion-label {
+  grid-column: 1 / -1;
+  text-align: center;
+}
+
+.suggestion-input {
+  grid-column: 1;
+}
+
+.suggestion-button {
+  grid-column: 2;
+}
+
+.suggestion-list {
+  grid-column: 1 / -1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 8rem;
+  overflow-y: auto;
+  border: 1px solid var(--text-secondary);
+  border-radius: 4px;
+  background: var(--card-bg);
+}
+
+.suggestion-item {
+  padding: 0.5rem;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.suggestion-item:hover {
+  background: var(--card-hover-bg);
+}
+
+.suggestion-status {
+  grid-column: 1 / -1;
+  text-align: center;
+  margin-top: 0.25rem;
+  color: var(--text-secondary);
+}
