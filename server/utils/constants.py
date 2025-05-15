@@ -37,3 +37,9 @@ SLIDING_WINDOW_SECS = 2.0
 
 # Number of top songs to cache in memory
 HOT_SONGS_K = 500
+
+# Spectral whitening parameters
+SPECTRAL_WHITENING_ALPHA = 0.98  # Smoothing factor for envelope estimation (0.95-0.98 good for music)
+SPECTRAL_WHITENING_BETA = 0.7    # Whitening strength (0-1, higher means more aggressive whitening)
+SPECTRAL_WHITENING_PRESERVE_PEAKS = True  # Whether to preserve spectral peaks
+SPECTRAL_WHITENING_DEEMPHASIS = True  # Whether to apply high-frequency de-emphasis

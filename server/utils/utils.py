@@ -5,7 +5,11 @@ from pydub import AudioSegment
 
 from numba import njit, types
 from numba.typed import Dict as TypedDict
-from utils.constants import FANOUT, FILTER_COEF, FINGERPRINT_CONFIGS, THRESHOLD_MULTIPLIER, WINDOW_SECS
+from utils.constants import (
+    FANOUT, FILTER_COEF, FINGERPRINT_CONFIGS, THRESHOLD_MULTIPLIER, WINDOW_SECS,
+    SPECTRAL_WHITENING_ALPHA, SPECTRAL_WHITENING_BETA, 
+    SPECTRAL_WHITENING_PRESERVE_PEAKS, SPECTRAL_WHITENING_DEEMPHASIS
+)
 
 def low_pass_filter(samples, cutoff, sample_rate):
     """Applies a first‐order low‐pass filter with cutoff frequency (Hz)."""
@@ -23,6 +27,154 @@ def downsample(samples, original_rate, target_rate):
     ratio = original_rate // target_rate
     return np.array([np.mean(samples[i:i+ratio]) for i in range(0, len(samples), ratio)])
 
+def apply_spectral_whitening(spectrogram, alpha=0.95, beta=0.7, preserve_peaks=True, deemphasis=True):
+    """
+    Apply spectral whitening to improve fingerprint robustness against noise.
+    
+    This implements a technique similar to Shazam's aggressive noise-robust 
+    normalization that equalizes amplitude and suppresses background hiss.
+    
+    Args:
+        spectrogram: Input spectrogram (2D numpy array)
+        alpha: Smoothing factor for spectral envelope estimation (0.95 is good for music)
+        beta: Whitening strength (0=none, 1=full whitening)
+        preserve_peaks: Whether to preserve spectral peaks during whitening
+        deemphasis: Whether to apply a de-emphasis filter to attenuate high frequencies
+        
+    Returns:
+        Whitened spectrogram with improved SNR
+    """
+    # Make a copy to avoid modifying the input
+    spec = np.copy(spectrogram)
+    
+    # First, apply a noise floor to avoid boosting near-zero values too much
+    noise_floor = np.mean(spec) * 0.01
+    spec = np.maximum(spec, noise_floor)
+    
+    # Find spectral peaks if requested
+    peak_mask = None
+    if preserve_peaks:
+        # Identify spectral peaks to preserve (local maxima)
+        peak_mask = (spec == maximum_filter(spec, size=(3, 3)))
+    
+    # Calculate running spectral envelope
+    envelope = np.zeros_like(spec)
+    for i in range(spec.shape[1]):
+        if i == 0:
+            envelope[:, i] = spec[:, i]
+        else:
+            envelope[:, i] = alpha * envelope[:, i-1] + (1-alpha) * np.maximum(spec[:, i], envelope[:, i-1])
+    
+    # Apply whitening (normalize by envelope)
+    whitened = np.zeros_like(spec)
+    for i in range(spec.shape[1]):
+        # Avoid division by zero
+        mask = envelope[:, i] > 1e-10
+        whitened[mask, i] = spec[mask, i] / (envelope[mask, i] ** beta)
+    
+    # Preserve peaks if requested
+    if preserve_peaks and peak_mask is not None:
+        # Keep original values at peak locations
+        whitened[peak_mask] = spec[peak_mask]
+    
+    # Apply spectral de-emphasis if requested (attenuate high frequencies)
+    if deemphasis:
+        # Apply a gradual rolloff for high frequencies
+        # Assuming rows represent frequencies from low to high
+        num_freqs = whitened.shape[0]
+        
+        # Create a de-emphasis filter that attenuates higher frequencies
+        # Starting at 50% of Nyquist, roll off progressively
+        deemph_curve = np.ones(num_freqs)
+        midpoint = num_freqs // 2
+        
+        # Gentle frequency rolloff to attenuate high frequencies
+        # This helps match natural speech/music spectrum and reduces artifacts
+        if midpoint > 0:
+            deemph_curve[midpoint:] = np.exp(-0.5 * np.linspace(0, 4, num_freqs - midpoint))
+            
+            # Apply the de-emphasis to the whitened spectrogram
+            for i in range(whitened.shape[1]):
+                whitened[:, i] *= deemph_curve
+    
+    # Dynamic range compression (logarithmic scaling)
+    # Using log1p to avoid log(0) issues and for better perceptual scaling
+    compressed = np.log1p(whitened * 10)
+    
+    # Final normalization to [0,1] range
+    min_val = np.min(compressed)
+    max_val = np.max(compressed)
+    if max_val > min_val:  # Avoid division by zero
+        normalized = (compressed - min_val) / (max_val - min_val)
+    else:
+        normalized = compressed
+    
+    return normalized
+
+def preprocess_audio_robust(samples, sample_rate):
+    """
+    Apply noise-robust preprocessing before fingerprinting.
+    
+    This implements Shazam-like preprocessing for improved recognition accuracy
+    in noisy environments.
+    
+    Args:
+        samples: Audio samples
+        sample_rate: Sample rate in Hz
+        
+    Returns:
+        Preprocessed samples ready for fingerprinting
+    """
+    # Apply bandpass filter (keep 100-5000Hz where most music info exists)
+    nyquist = sample_rate / 2
+    low, high = 100 / nyquist, 5000 / nyquist
+    b, a = signal.butter(4, [low, high], btype='band')
+    filtered = signal.filtfilt(b, a, samples)
+    
+    # Calculate spectrogram
+    nperseg = int(0.025 * sample_rate)  # 25ms windows
+    noverlap = int(nperseg * 0.5)       # 50% overlap
+    
+    # Use Hann window for better frequency resolution
+    f, t, spec = signal.spectrogram(filtered, fs=sample_rate, 
+                                  nperseg=nperseg, noverlap=noverlap,
+                                  window='hann', mode='complex')
+    
+    # Apply spectral whitening to the magnitude of the spectrogram
+    mag_spec = np.abs(spec)
+    whitened_mag = apply_spectral_whitening(mag_spec, 
+                                           alpha=SPECTRAL_WHITENING_ALPHA,
+                                           beta=SPECTRAL_WHITENING_BETA,
+                                           preserve_peaks=SPECTRAL_WHITENING_PRESERVE_PEAKS,
+                                           deemphasis=SPECTRAL_WHITENING_DEEMPHASIS)
+    
+    # Phase preservation is critical for audio quality
+    # Use the original phase information
+    phase = np.angle(spec)
+    
+    # Reconstruct complex spectrum
+    S_whitened = whitened_mag * np.exp(1j * phase)
+    
+    # Reconstruct time domain signal with optimal parameters
+    _, enhanced = signal.istft(S_whitened, fs=sample_rate, 
+                             nperseg=nperseg, noverlap=noverlap, 
+                             window='hann')
+    
+    # Ensure we have an appropriate length
+    if len(enhanced) > len(samples):
+        enhanced = enhanced[:len(samples)]
+    elif len(enhanced) < len(samples):
+        enhanced = np.pad(enhanced, (0, len(samples) - len(enhanced)), 'constant')
+    
+    # Apply post-whitening smoothing filter to reduce potential artifacts
+    b, a = signal.butter(2, 0.9)  # Light lowpass to smooth any artifacts
+    enhanced = signal.filtfilt(b, a, enhanced)
+    
+    # Normalize amplitude
+    if np.max(np.abs(enhanced)) > 0:
+        enhanced = enhanced / np.max(np.abs(enhanced))
+    
+    return enhanced
 
 def audio_file_to_samples(file_obj):
     """
@@ -31,8 +183,11 @@ def audio_file_to_samples(file_obj):
     It then applies a low-pass filter with a 5kHz cutoff and downsamples 
     from 44.1 kHz to approximately 11.025 kHz, matching the seek‑tune approach.
     
+    Additionally, it applies Shazam-like spectral whitening and noise-robust
+    normalization for improved recognition in noisy environments.
+    
     Returns:
-        samples (numpy array): Filtered and downsampled audio samples (floats).
+        samples (numpy array): Filtered, whitened and downsampled audio samples (floats).
         sample_rate (int): New sample rate (approximately 11025).
     """
     try:
@@ -47,8 +202,15 @@ def audio_file_to_samples(file_obj):
     else:
         samples = samples.astype(np.float32)
     
+    # Apply initial low-pass filtering
     filtered_samples = low_pass_filter(samples, cutoff=5000, sample_rate=44100)
-    downsampled_samples = downsample(filtered_samples, original_rate=44100, target_rate=44100 // 4)  # -> ~11025 Hz
+    
+    # Apply the robust spectral whitening preprocessing
+    robust_samples = preprocess_audio_robust(filtered_samples, 44100)
+    
+    # Downsample after preprocessing for efficiency
+    downsampled_samples = downsample(robust_samples, original_rate=44100, target_rate=44100 // 4)  # -> ~11025 Hz
+    
     return downsampled_samples, 44100 // 4  # Effective rate
 
 def generate_fingerprints(samples, sample_rate,
