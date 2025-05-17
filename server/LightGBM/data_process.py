@@ -1,13 +1,10 @@
-import os
-import random
-import numpy as np
-import pandas as pd
-from io import BytesIO
+import os, random, numpy as np, pandas as pd
+from concurrent.futures import ProcessPoolExecutor
+from tqdm import tqdm
 
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(__file__, "..", "..")))
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from utils.utils import audio_file_to_samples, generate_fingerprints_multiresolution
 
 # CONFIG
@@ -16,18 +13,15 @@ WINDOW_SECS   = 2.0
 STEP_SECS     = 2.0
 MAX_PROCS     = 8
 
-# Load the CSV of paths
+# 1) Load your list of files
 df_paths = pd.read_csv(PROCESSED_CSV)
-paths = df_paths["wav file location"].tolist()
-modified_paths = []
-
-for path in paths:
-    modified_paths.append(os.path.join('..', 'download', path))
-
-paths = modified_paths
+paths = [
+    os.path.join("..", "download", p)
+    for p in df_paths["wav file location"]
+]
 
 def process_song(path):
-    """Load one song, fingerprint every window, return list of records."""
+    """Fingerprint every 2s window of one song."""
     song_id = os.path.splitext(os.path.basename(path))[0]
     with open(path, "rb") as f:
         samples, sr = audio_file_to_samples(f)
@@ -36,52 +30,36 @@ def process_song(path):
     recs = []
     for start in range(0, len(samples) - w + 1, s):
         chunk = samples[start:start + w]
-        fps = generate_fingerprints_multiresolution(chunk, sr)
-        for h, t in fps:
+        for h, t in generate_fingerprints_multiresolution(chunk, sr):
             recs.append({"hash": h, "song_id": song_id, "label": 1})
     return recs
 
-# 1) POSITIVES in parallel
+# 2) POSITIVES in parallel with a progress bar
 records = []
 with ProcessPoolExecutor(max_workers=MAX_PROCS) as exe:
-    futures = {exe.submit(process_song, p): p for p in paths}
-    for fut in as_completed(futures):
-        recs = fut.result()
+    # executor.map returns results in input order, so we can wrap in tqdm
+    for recs in tqdm(exe.map(process_song, paths),
+                     total=len(paths),
+                     desc="Fingerprinting songs"):
         records.extend(recs)
 
-# 2) NEGATIVES (you can similarly parallelize if desired)
+# 3) NEGATIVES — just one loop, no duplicates
 song_ids = [os.path.splitext(os.path.basename(p))[0] for p in paths]
-for song_id in song_ids:
+for song_id in tqdm(song_ids, desc="Sampling negatives"):
     other = random.choice([s for s in song_ids if s != song_id])
-    other_path = df_paths[df_paths["wav file location"].str.contains(other)]["wav file location"].iloc[0]
+    other_path = next(p for p in paths if os.path.splitext(os.path.basename(p))[0] == other)
     with open(other_path, "rb") as f:
         samples, sr = audio_file_to_samples(f)
     w = int(WINDOW_SECS * sr)
-    if len(samples) <= w: continue
+    if len(samples) <= w: 
+        continue
     start = np.random.randint(0, len(samples) - w)
     chunk = samples[start:start + w]
-    fps = generate_fingerprints_multiresolution(chunk, sr)
-    for h, t in fps:
+    for h, t in generate_fingerprints_multiresolution(chunk, sr):
         records.append({"hash": h, "song_id": song_id, "label": 0})
 
-# 3) NEGATIVES: for each song, pick one random window from a *different* song
-song_ids = df_paths["wav file location"].apply(lambda p: os.path.splitext(os.path.basename(p))[0]).tolist()
-for song_id in tqdm(song_ids, desc="Negative examples"):
-    other = random.choice([s for s in song_ids if s != song_id])
-    other_row = df_paths[df_paths["wav file location"].str.contains(other)].iloc[0]
-    with open(other_row["wav file location"], "rb") as f:
-        samples, sr = audio_file_to_samples(f)
-    if len(samples) <= int(WINDOW_SECS * sr):
-        continue
-    start = np.random.randint(0, len(samples) - int(WINDOW_SECS * sr))
-    chunk = samples[start:start + int(WINDOW_SECS * sr)]
-    fps = generate_fingerprints_multiresolution(chunk, sr)
-    for h, t in fps:
-        records.append({"hash": h, "song_id": song_id, "label": 0})
-
-# 4) Build the feature CSV exactly as before
+# 4) Build and save your feature CSV
 df = pd.DataFrame(records)
-# document frequency on positives
 df_df = (
     df[df.label == 1]
       .groupby("hash")["song_id"]
@@ -89,7 +67,6 @@ df_df = (
       .reset_index(name="df")
 )
 df = df.merge(df_df, on="hash", how="left").fillna({"df": 1})
-# parse delta_f and family
 df["delta_f"], df["family"] = zip(*df["hash"].map(lambda h: (
     abs(int(h.split(':')[1]) - int(h.split(':')[0])),
     h.split(':')[-1]
