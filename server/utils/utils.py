@@ -2,13 +2,22 @@ import numpy as np
 from scipy import signal
 from scipy.ndimage import maximum_filter
 from pydub import AudioSegment
+import librosa
 
 from numba import njit, types
 from numba.typed import Dict as TypedDict
-from utils.constants import FANOUT, FILTER_COEF, FINGERPRINT_CONFIGS, THRESHOLD_MULTIPLIER, WINDOW_SECS
+
+from utils.constants import (
+    FANOUT, FILTER_COEF, FINGERPRINT_CONFIGS, THRESHOLD_MULTIPLIER,
+    WINDOW_SECS,
+    CQT_CONFIGS, CQT_MIN_FREQ, CQT_MAX_FREQ,
+    CQT_THRESHOLD, CQT_FILTER_COEF, CQT_FANOUT, CQT_WINDOW_SECS as CQT_WINDOW
+)
+
+# --- Existing STFT-based fingerprinting ---
 
 def low_pass_filter(samples, cutoff, sample_rate):
-    """Applies a first‐order low‐pass filter with cutoff frequency (Hz)."""
+    """Applies a first–order low–pass filter with cutoff frequency (Hz)."""
     rc = 1.0 / (2 * np.pi * cutoff)
     dt = 1.0 / sample_rate
     alpha = dt / (rc + dt)
@@ -17,6 +26,7 @@ def low_pass_filter(samples, cutoff, sample_rate):
     for i in range(1, len(samples)):
         filtered[i] = alpha * samples[i] + (1 - alpha) * filtered[i - 1]
     return filtered
+
 
 def downsample(samples, original_rate, target_rate):
     """Downsamples the samples by averaging groups of samples."""
@@ -27,30 +37,22 @@ def downsample(samples, original_rate, target_rate):
 def audio_file_to_samples(file_obj):
     """
     Loads an audio file from a file-like object and converts it to mono.
-    
-    It then applies a low-pass filter with a 5kHz cutoff and downsamples 
-    from 44.1 kHz to approximately 11.025 kHz, matching the seek‑tune approach.
-    
-    Returns:
-        samples (numpy array): Filtered and downsampled audio samples (floats).
-        sample_rate (int): New sample rate (approximately 11025).
+    Applies low-pass filter and downsamples.
+    Returns samples (floats) and new sample rate.
     """
     try:
         audio = AudioSegment.from_file(file_obj)
     except Exception as err:
         raise Exception(f"Error loading audio file: {err}")
-    
     audio = audio.set_channels(1).set_frame_rate(44100)
     samples = np.array(audio.get_array_of_samples())
     if audio.sample_width == 2:
         samples = samples.astype(np.int16) / 32768.0
     else:
         samples = samples.astype(np.float32)
-    
-    filtered_samples = low_pass_filter(samples, cutoff=5000, sample_rate=44100)
-    downsampled_samples = downsample(filtered_samples, original_rate=44100, target_rate=44100 // 4)  # -> ~11025 Hz
-    return downsampled_samples, 44100 // 4  # Effective rate
-
+    filtered = low_pass_filter(samples, cutoff=5000, sample_rate=44100)
+    down = downsample(filtered, original_rate=44100, target_rate=44100//4)
+    return down, 44100 // 4
 def generate_fingerprints(samples, sample_rate,
                           threshold_multiplier=3,   # Adaptive multiplier (try tuning between 3 and 4)
                           filter_coef=0.5,            # Global filtering coefficient
@@ -133,22 +135,85 @@ def generate_fingerprints(samples, sample_rate,
                 count += 1
     return fingerprints
 
+def extract_cqt_peaks(cqt_mag, hop_length, threshold_multiplier, filter_coef, sample_rate):
+    """Peak picking on CQT magnitude spectrogram."""
+    local_max = (cqt_mag == maximum_filter(cqt_mag, size=(3, 3)))
+    n_bins, n_frames = cqt_mag.shape
+    candidates = []
+    for t_idx in range(n_frames):
+        frame = cqt_mag[:, t_idx]
+        amp_thresh = np.median(frame) + threshold_multiplier * np.std(frame)
+        peak_idxs = np.where((local_max[:, t_idx]) & (frame >= amp_thresh))[0]
+        amps = frame[peak_idxs]
+        if amps.size == 0:
+            continue
+        mean_amp = np.mean(frame)
+        keep = peak_idxs[amps >= mean_amp * filter_coef]
+        for idx in keep:
+            time_sec = t_idx * hop_length / sample_rate
+            candidates.append((time_sec, idx))
+    return candidates
+
+
+def generate_cqt_fingerprints(samples, sample_rate):
+    """Generates CQT-based fingerprint hashes ensuring no Nyquist exceedance."""
+    fps = []
+    # limit max frequency to Nyquist
+    max_freq = min(CQT_MAX_FREQ, sample_rate / 2.0)
+    # compute number of octaves (floor) to avoid exceeding Nyquist
+    num_octaves = int(np.floor(np.log2(max_freq / CQT_MIN_FREQ)))
+    for bins_per_oct, hop_length, version in CQT_CONFIGS:
+        n_bins = bins_per_oct * num_octaves
+        # compute CQT magnitude
+        cqt = librosa.cqt(
+            samples,
+            sr=sample_rate,
+            hop_length=hop_length,
+            fmin=CQT_MIN_FREQ,
+            n_bins=n_bins,
+            bins_per_octave=bins_per_oct
+        )
+        mag = np.abs(cqt)
+        # mask out bins above adjusted max frequency
+        freqs = librosa.cqt_frequencies(n_bins, fmin=CQT_MIN_FREQ, bins_per_octave=bins_per_oct)
+        mask = freqs <= max_freq
+        mag = mag[mask]
+        # extract peaks
+        peaks = extract_cqt_peaks(mag, hop_length, CQT_THRESHOLD, CQT_FILTER_COEF, sample_rate)
+        peaks.sort(key=lambda x: x[0])
+        # pairing
+        for i, (t1, f1) in enumerate(peaks):
+            count = 0
+            for t2, f2 in peaks[i+1:]:
+                dt = t2 - t1
+                if dt > CQT_WINDOW:
+                    break
+                if count < CQT_FANOUT:
+                    hash_str = f"{int(f1)}:{int(f2)}:{int(dt*100)}:{version}"
+                    fps.append((hash_str, t1))
+                    count += 1
+    return fps
+
 def generate_fingerprints_multiresolution(samples, sample_rate):
-    configs = FINGERPRINT_CONFIGS
+    """STFT and CQT multi-resolution fingerprint generation."""
     all_fps = []
-    for window_size, hop_size, version in configs:
+    # existing STFT fingerprints
+    for window_size, hop_size, version in FINGERPRINT_CONFIGS:
         fps = generate_fingerprints(
             samples, sample_rate,
-            threshold_multiplier=THRESHOLD_MULTIPLIER,  # Tune 
-            filter_coef=FILTER_COEF,         # Tune 
-            fanout=FANOUT,                # Tune: smaller fanout yields fewer pairings
+            threshold_multiplier=THRESHOLD_MULTIPLIER,
+            filter_coef=FILTER_COEF,
+            fanout=FANOUT,
             window_secs=WINDOW_SECS,
             window_size=window_size,
             hop_size=hop_size,
-            band_boundaries=None  
+            band_boundaries=None
         )
-        fps_with_version = [(f"{hash_str}:{version}", candidate_time) for (hash_str, candidate_time) in fps]
-        all_fps.extend(fps_with_version)
+        fps = [(f"{h}:{version}", t) for (h, t) in fps]
+        all_fps.extend(fps)
+    # add CQT-based fingerprints
+    cqt_fps = generate_cqt_fingerprints(samples, sample_rate)
+    all_fps.extend(cqt_fps)
     return all_fps
 
 # --- Numba-accelerated helper ---
