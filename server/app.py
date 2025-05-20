@@ -126,21 +126,19 @@ async def find_fingerprint_batch(batch):
 # Ensure the hash index exists and schedule tasks
 @app.before_serving
 async def ensure_index():
-    # schedule index creation
-    asyncio.ensure_future(
-        fingerprints_col.create_index([
-            ("hash", 1),
-            ("song_id", 1),
-            ("offset", 1)
-        ])
+    # build the compound index _before_ doing any aggregations
+    await fingerprints_col.create_index(
+        [("hash", 1), ("song_id", 1), ("offset", 1)],
+        background=True
     )
-    # tune WiredTiger cache
+
+    # now it’s safe to tune cache and compute counts
     cache_gb = 45
     await client.admin.command({
         "setParameter": 1,
         "wiredTigerEngineRuntimeConfig": f"cache_size={cache_gb}G"
     })
-    # Precompute fingerprint counts for normalization
+
     counts = await fingerprints_col.aggregate([
         {"$group": {"_id": "$song_id", "count": {"$sum": 1}}}
     ]).to_list(length=None)
