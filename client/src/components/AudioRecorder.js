@@ -118,6 +118,7 @@ const AudioRecorder = ({ backendUrl }) => {
     } catch (err) {
       console.error(err);
       alert('Unable to access microphone.');
+      setHeaderText('Tap to Shazoom');
     }
   };
 
@@ -125,7 +126,7 @@ const AudioRecorder = ({ backendUrl }) => {
     if (!isRecording) {
       setResult(null);
       setIsLoading(false);
-      setHeaderText('Listening...');
+      setHeaderText('Connecting...');
       startStreaming();
     }
   };
