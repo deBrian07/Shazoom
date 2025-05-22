@@ -47,7 +47,6 @@ def main():
     
     songs_col = db["songs"]
     fingerprints_col = db["fingerprints"]
-    # fingerprints_col.create_index("hash")
     
     csv_path = os.path.join("download", "processed.csv")
     songs_to_add = []

@@ -124,29 +124,46 @@ async def find_fingerprint_batch(batch):
     return res
 
 # Ensure the hash index exists and schedule tasks
-@app.before_serving
-async def ensure_index():
-    # build the compound index _before_ doing any aggregations
-    await fingerprints_col.create_index(
-        [("hash", 1), ("song_id", 1), ("offset", 1)],
-        background=True
-    )
+from pymongo.errors import OperationFailure
 
-    # now it’s safe to tune cache and compute counts
-    cache_gb = 45
+@app.before_serving
+async def ensure_index_and_counts():
+    # 1) Check existing indexes
+    existing = await fingerprints_col.index_information()
+    if "hash_1_song_id_1_offset_1" not in existing:
+        # build it _once_ (blocking until registered)
+        await fingerprints_col.create_index(
+            [("hash", 1), ("song_id", 1), ("offset", 1)],
+            background=True
+        )
+
+    # 2) Tune WiredTiger cache
     await client.admin.command({
         "setParameter": 1,
-        "wiredTigerEngineRuntimeConfig": f"cache_size={cache_gb}G"
+        "wiredTigerEngineRuntimeConfig": f"cache_size={45}G"
     })
 
-    counts = await fingerprints_col.aggregate([
+    # 3) Safe aggregation with one retry on QueryPlanKilled
+    pipeline = [
         {"$group": {"_id": "$song_id", "count": {"$sum": 1}}}
-    ]).to_list(length=None)
+    ]
+    for attempt in range(2):
+        try:
+            counts = await fingerprints_col.aggregate(pipeline).to_list(length=None)
+            break
+        except OperationFailure as e:
+            if e.codeName == "QueryPlanKilled" and attempt == 0:
+                # harmless, retry once
+                continue
+            raise
+
+    # 4) Populate your globals
     global song_fp_count, avg_fp_length
     song_fp_count = {doc["_id"]: doc["count"] for doc in counts}
-    avg_fp_length = sum(song_fp_count.values()) / len(song_fp_count) if song_fp_count else 1.0
-    print(f"Computed fingerprint counts: {len(song_fp_count)} songs, avg={avg_fp_length:.2f}")
-    # schedule background tasks
+    avg_fp_length = (sum(song_fp_count.values()) / len(song_fp_count)) if song_fp_count else 1.0
+    print(f"Loaded {len(song_fp_count)} songs, avg fingerprints = {avg_fp_length:.2f}")
+
+    # 5) Schedule the other background tasks
     asyncio.create_task(_prewarm_hot_hashes())
     asyncio.create_task(_monitor_ram())
     asyncio.create_task(_refresh_hot_songs())
