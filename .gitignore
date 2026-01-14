@@ -4,3 +4,7 @@
 /server/__pycache__
 /client/dist
 /server/utils/__pycache__
+.vscode/settings.json
+server/tests/__pycache__
+server/LightGBM/__pycache__
+server/LightGBM/downloads

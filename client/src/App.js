@@ -3,8 +3,8 @@ import AudioRecorder from './components/AudioRecorder';
 import './App.css';
 
 function App() {
-  // Replace <YOUR_BACKEND_URL> with the actual URL of your Flask backend, e.g., "http://47.229.136.34:5000"
-  const backendUrl = "https://api.shazoom.app";
+  // Backend base URL (configure with REACT_APP_BACKEND_URL; falls back to the current backend IP)
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || "http://47.229.32.217:5000";
 
   return (
     <div className="App">
